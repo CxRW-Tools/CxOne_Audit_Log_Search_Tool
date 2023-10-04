@@ -32,9 +32,9 @@ python script_name.py --base_url [BASE_URL] --tenant_name [TENANT_NAME] --api_ke
 ### Optional Arguments:
 
 - `--debug`: Enable debug output.
-- `--search-string`: Filter events containing specific strings.
+- `--search_string`: Filter events containing specific strings.
 - `--raw`: Output raw logs.
-- `--human-readable`: Resolve UUIDs to human-readable strings.
+- `--human_readable`: Resolve UUIDs to human-readable strings.
 
 ## Usage Examples
 
@@ -53,7 +53,7 @@ python script_name.py --base_url [BASE_URL] --tenant_name [TENANT_NAME] --api_ke
 3. With a search string:
 
     ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --search-string "login"
+    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --search_string "login"
     ```
 
 4. Output raw logs:
@@ -65,7 +65,7 @@ python script_name.py --base_url [BASE_URL] --tenant_name [TENANT_NAME] --api_ke
 5. Resolve UUIDs to human-readable strings:
 
     ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --human-readable
+    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --human_readable
     ```
 
 ## Output
