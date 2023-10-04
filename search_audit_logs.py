@@ -454,9 +454,9 @@ def main():
     parser.add_argument('--start_date', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('--end_date', required=True, help='End date in YYYY-MM-DD format')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--search-string', required=False, help='Filter events containing specific strings')
+    parser.add_argument('--search_string', required=False, help='Filter events containing specific strings')
     parser.add_argument('--raw', action='store_true', help='Output raw logs')
-    parser.add_argument('--human-readable', action='store_true', help='Resolve UUIDs to human-readable strings')
+    parser.add_argument('--human_readable', action='store_true', help='Resolve UUIDs to human-readable strings')
 
     args = parser.parse_args()
     
@@ -480,6 +480,9 @@ def main():
 
     auth_url = generate_auth_url()
     auth_token = authenticate(args.api_key)
+    
+    if auth_token is None:
+        return
 
     logs = fetch_audit_logs(start_date, end_date)
 
