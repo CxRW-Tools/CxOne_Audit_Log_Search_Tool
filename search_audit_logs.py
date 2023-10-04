@@ -408,6 +408,11 @@ def output_logs(logs, raw=False, human_readable=False):
     
     flat_logs = [event for sublist in logs.values() for event in sublist]
     flat_logs.sort(key=lambda x: x.get('eventDate'))
+   
+   # Check if there are any logs to output
+    if not flat_logs:
+        print("No logs found for the specified criteria.")
+        return
 
     if human_readable:
         for log in flat_logs:
