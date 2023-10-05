@@ -18,10 +18,10 @@ The script is designed to search and fetch audit logs from the CxOne platform. I
 Run the script using the following syntax:
 
 ```bash
-python script_name.py --base_url [BASE_URL] [--iam_base_url IAM_BASE_URL] --tenant_name [TENANT_NAME] --api_key [API_KEY] --start_date [START_DATE] --end_date [END_DATE] [OPTIONS]
+python script_name.py --base_url BASE_URL --tenant_name TENANT_NAME --api_key API_KEY --start_date START_DATE --end_date END_DATE [OPTIONS]
 ```
 
-### Required Arguments:
+### Required Arguments
 
 - `--base_url`: The base URL of the CxOne region.
 - `--tenant_name`: The name of the tenant.
@@ -29,45 +29,39 @@ python script_name.py --base_url [BASE_URL] [--iam_base_url IAM_BASE_URL] --tena
 - `--start_date`: The start date for fetching logs, in YYYY-MM-DD format.
 - `--end_date`: The end date for fetching logs, in YYYY-MM-DD format.
 
-### Optional Arguments:
+### Optional Arguments
 
-- `--iam_base_url`: The IAM base URL of the CxOne region.
-- `--debug`: Enable debug output.
-- `--search_string`: Filter events containing specific strings.
-- `--raw`: Output raw logs.
-- `--human_readable`: Resolve UUIDs to human-readable strings.
+- `--iam_base_url`: The IAM base URL of the CxOne region. If not provided, it will be generated based on the `base_url`.
+- `--debug`: Enable debug output. (Flag, no value required)
+- `--search_string`: A string to filter events. Only events containing this string will be included.
+- `--raw`: Output raw logs. (Flag, no value required)
+- `--human_readable`: Resolve UUIDs to human-readable strings. (Flag, no value required)
 
 ## Usage Examples
 
-1. Basic usage:
+Fetch logs for a specific date range:
 
-    ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31
-    ```
+```bash
+python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31
+```
 
-2. With debug output:
+Fetch logs with debug output:
 
-    ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --debug
-    ```
+```bash
+python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31 --debug
+```
 
-3. With a search string:
+Fetch logs and filter them by a specific string:
 
-    ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --search_string "login"
-    ```
+```bash
+python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31 --search_string "login"
+```
 
-4. Output raw logs:
+Fetch logs with a specified IAM base URL:
 
-    ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --raw
-    ```
-
-5. Resolve UUIDs to human-readable strings:
-
-    ```bash
-    python script_name.py --base_url https://example.com --tenant_name my_tenant --api_key 12345 --start_date 2021-01-01 --end_date 2021-01-31 --human_readable
-    ```
+```bash
+python script_name.py --base_url https://example.com --iam_base_url https://iam.example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31
+```
 
 ## Output
 
