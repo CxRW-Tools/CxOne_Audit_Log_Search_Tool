@@ -18,7 +18,7 @@ The script is designed to search and fetch audit logs from the CxOne platform. I
 Run the script using the following syntax:
 
 ```bash
-python script_name.py --base_url [BASE_URL] --tenant_name [TENANT_NAME] --api_key [API_KEY] --start_date [START_DATE] --end_date [END_DATE] [OPTIONS]
+python script_name.py --base_url [BASE_URL] [--iam_base_url IAM_BASE_URL] --tenant_name [TENANT_NAME] --api_key [API_KEY] --start_date [START_DATE] --end_date [END_DATE] [OPTIONS]
 ```
 
 ### Required Arguments:
@@ -31,6 +31,7 @@ python script_name.py --base_url [BASE_URL] --tenant_name [TENANT_NAME] --api_ke
 
 ### Optional Arguments:
 
+- `--iam_base_url`: The IAM base URL of the CxOne region.
 - `--debug`: Enable debug output.
 - `--search_string`: Filter events containing specific strings.
 - `--raw`: Output raw logs.
