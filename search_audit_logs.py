@@ -2,6 +2,7 @@
 # pip install requests==2.31.0
 # pip install tqdm==4.66.1
 
+import sys
 import requests  # version 2.31.0
 import json
 import datetime
@@ -26,21 +27,25 @@ uuid_cache = {}
 
 def generate_auth_url():
     global iam_base_url
+        
     try:
         if debug:
             print("Generating authentication URL...")
         
-        iam_base_url = base_url.replace("ast.checkmarx.net", "iam.checkmarx.net")
+        if iam_base_url is None:
+            iam_base_url = base_url.replace("ast.checkmarx.net", "iam.checkmarx.net")
+            if debug:
+                print(f"Generated IAM base URL: {iam_base_url}")
+        
         temp_auth_url = f"{iam_base_url}/auth/realms/{tenant_name}/protocol/openid-connect/token"
         
         if debug:
             print(f"Generated authentication URL: {temp_auth_url}")
-            print(f"Generated IAM base URL: {iam_base_url}")
         
         return temp_auth_url
     except AttributeError:
         print("Error: Invalid base_url provided.")
-        return None
+        sys.exit(1)
 
 def authenticate(api_key):
     if auth_url is None:
@@ -76,15 +81,18 @@ def authenticate(api_key):
         return access_token
     except requests.exceptions.RequestException as e:
         print(f"An error occurred during authentication: {e}")
-        return None
+        sys.exit(1)
 
 def fetch_audit_logs(start_date, end_date):
     if auth_token is None:
         return None
     
-    # Initialize tqdm object with unknown total if debug is False
-    pbar = tqdm(total=(end_date - start_date).days, desc="Processing events") if not debug else None
-    
+    if debug:
+        print("Fetching audit logs...")
+
+    # Initialize tqdm object with the date range if debug is False
+    pbar = tqdm(total=(end_date - start_date).days, desc="Retrieving events") if not debug else None
+
     try:
         audit_url = f"{base_url}/api/audit/"
         headers = {'Accept': 'application/json', 'Authorization': f'Bearer {auth_token}'}
@@ -95,36 +103,45 @@ def fetch_audit_logs(start_date, end_date):
         if debug:
             print("Fetched initial audit log links.")
         
-        # Update tqdm object with the actual total
-        if pbar:
-            pbar.total = len(json_response.get('links', []))
-            pbar.refresh()
-        
         logs = {}
         found_links = False
         
         links = json_response.get('links', [])
         
+        # Filter links based on event date
+        filtered_links = []
+        for link in links:
+            event_date_str = link.get('eventDate')
+            if event_date_str:
+                event_date = parse(event_date_str).date()
+                if start_date <= event_date <= end_date:
+                    filtered_links.append(link)
+        
+        # Update tqdm object with the actual total
+        if pbar:
+            pbar.total = len(filtered_links)
+            pbar.refresh()
+        
         # Create a ThreadPoolExecutor
         with ThreadPoolExecutor() as executor:
             future_to_date = {}
-            for link in links:
+            for link in filtered_links:
                 event_date_str = link.get('eventDate')
-                if event_date_str:
-                    event_date = parse(event_date_str).date()
-                    if start_date <= event_date <= end_date:
-                        found_links = True
-                        if debug:
-                            print(f"Scheduling detailed logs fetching for {event_date}")
-                        future = executor.submit(fetch_detailed_logs, link.get('url'))
-                        future_to_date[future] = event_date
+                event_date = parse(event_date_str).date()
+                found_links = True
+                if debug:
+                    print(f"Requesting detailed logs for {event_date}")
+                future = executor.submit(fetch_detailed_logs, link.get('url'))
+                future_to_date[future] = event_date
 
             for future in as_completed(future_to_date):
                 event_date = future_to_date[future]
+                if debug:
+                    print(f"Capturing events for {event_date}")
                 try:
                     logs[event_date] = future.result()
                 except Exception as e:
-                    print(f"An error occurred during fetching detailed logs for {event_date}: {e}")
+                    print(f"An error occurred while fetching detailed logs for {event_date}: {e}")
 
                 # Update tqdm object
                 if pbar:
@@ -149,8 +166,8 @@ def fetch_audit_logs(start_date, end_date):
         
         return logs
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred during fetching audit logs: {e}")
-        return None
+        print(f"An error occurred while fetching audit logs: {e}")
+        sys.exit(1)
 
 def fetch_detailed_logs(url):
     try:
@@ -165,7 +182,7 @@ def fetch_detailed_logs(url):
         return json_response
     except requests.exceptions.RequestException as e:
         print(f"An error occurred during fetching detailed logs: {e}")
-        return None
+        sys.exit(1)
 
 def apply_filters(logs, search_string=None):
     if debug:
@@ -451,9 +468,11 @@ def main():
     global debug
     global auth_url
     global auth_token
+    global iam_base_url
 
     parser = argparse.ArgumentParser(description='Search CxOne Audit Logs')
     parser.add_argument('--base_url', required=True, help='Region Base URL')
+    parser.add_argument('--iam_base_url', required=False, help='Region IAM Base URL')
     parser.add_argument('--tenant_name', required=True, help='Tenant name')
     parser.add_argument('--api_key', required=True, help='API key for authentication')
     parser.add_argument('--start_date', required=True, help='Start date in YYYY-MM-DD format')
@@ -468,15 +487,24 @@ def main():
     try:
         start_date = datetime.strptime(args.start_date, '%Y-%m-%d').date()
         end_date = datetime.strptime(args.end_date, '%Y-%m-%d').date()
+        # If end_date is in the future, set it to today
+        if date.today() < end_date:
+            end_date = date.today()
+            
     except ValueError:
         print("Error: Invalid date format. Please use YYYY-MM-DD.")
-        return
+        sys.exit(1)
 
     if start_date > end_date:
         print("Error: Start date is after the end date. Please provide a valid date range.")
-        return
+        sys.exit(1)
 
     base_url = args.base_url
+    
+    # Set iam_base_url if it's provided as an argument
+    if args.iam_base_url:
+        iam_base_url = args.iam_base_url
+    
     tenant_name = args.tenant_name
     debug = args.debug
     
