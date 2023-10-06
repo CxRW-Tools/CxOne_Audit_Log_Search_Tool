@@ -13,8 +13,7 @@ import re
 from dateutil.parser import parse
 from tqdm import tqdm  # version 4.66.1
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-
+from threading import Lock
 
 base_url = None
 tenant_name = None
@@ -23,6 +22,7 @@ auth_url = None
 iam_base_url = None
 auth_token = None
 uuid_cache = {}
+uuid_cache_lock = Lock()
 
 
 def generate_auth_url():
@@ -373,16 +373,18 @@ def resolve_roleid(uuid):
         return "Unresolved Role ID"
 
 def resolve_uuid(uuid, uuid_type):
+    global uuid_cache_lock
+
     if debug:
         print(f"Resolving UUID {uuid} of type {uuid_type}...")
 
-    # Check if the UUID is already in the cache
-    if uuid in uuid_cache:
-        if debug:
-            print(f"Cache hit for UUID {uuid}. Using cached value.")
-        return uuid_cache[uuid]
-    elif debug:
-        print(f"UUID {uuid} is not in the cache")
+    with uuid_cache_lock:
+        if uuid in uuid_cache:
+            if debug:
+                print(f"Cache hit for UUID {uuid}. Using cached value.")
+            return uuid_cache[uuid]
+        elif debug:
+            print(f"UUID {uuid} is not in the cache")
 
     if uuid_type == 'actionUserId' or uuid_type == 'userId':
         return resolve_userid(uuid)
@@ -398,24 +400,28 @@ def resolve_uuid(uuid, uuid_type):
 def resolve_uuids_in_dict(d):
     if debug:
         print("Resolving UUIDs in dictionary...")
-        
-    for key, value in d.items():
-        if isinstance(value, dict):
-            resolve_uuids_in_dict(value)
-        elif isinstance(value, list):
-            uuid_type = 'roleId' if key in ['assignedRoles', 'unassignedRoles'] else key
-            d[key] = [resolve_uuid(v, uuid_type) if is_uuid(str(v)) else v for v in value]
-        elif isinstance(value, str):
-            if value.startswith("[") and value.endswith("]"):
-                try:
-                    list_value = value[1:-1].split(", ")
-                    list_value = [item.strip() for item in list_value]
-                    d[key] = [resolve_uuid(v, key) if is_uuid(str(v)) else v for v in list_value]
-                except Exception as e:
-                    print(f"Exception while parsing list: {e}")
-            elif is_uuid(value):
-                d[key] = resolve_uuid(value, key)
-                
+
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        for key, value in d.items():
+            if isinstance(value, dict):
+                resolve_uuids_in_dict(value)
+            elif isinstance(value, list):
+                uuid_type = 'roleId' if key in ['assignedRoles', 'unassignedRoles'] else key
+                for v in value:
+                    if is_uuid(str(v)):
+                        future = executor.submit(resolve_uuid, v, uuid_type)
+                        futures.append((key, future))
+            elif isinstance(value, str) and is_uuid(value):
+                future = executor.submit(resolve_uuid, value, key)
+                futures.append((key, future))
+
+        for key, future in futures:
+            try:
+                d[key] = future.result()
+            except Exception as e:
+                print(f"Exception while resolving UUID: {e}")
+
     if debug:
         print("Finished resolving UUIDs.")
 
@@ -493,6 +499,10 @@ def main():
             
     except ValueError:
         print("Error: Invalid date format. Please use YYYY-MM-DD.")
+        sys.exit(1)
+
+    if start_date > date.today():
+        print("Error: Start date is in the future. Please provide a valid date range.")
         sys.exit(1)
 
     if start_date > end_date:
