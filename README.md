@@ -4,15 +4,6 @@
 
 The script is designed to search and fetch audit logs from the CxOne platform. It uses multi-threading to fetch detailed logs and offers various options for filtering and outputting the logs. The script also resolves UUIDs to human-readable strings for easier interpretation.
 
-## Requirements
-
-- Python 3.x
-- Install the required packages:
-  ```
-  pip install requests==2.31.0
-  pip install tqdm==4.66.1
-  ```
-
 ## Syntax and Arguments
 
 Run the script using the following syntax:
