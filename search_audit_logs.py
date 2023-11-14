@@ -1,9 +1,5 @@
-# Install specific versions packages
-# pip install requests==2.31.0
-# pip install tqdm==4.66.1
-
 import sys
-import requests  # version 2.31.0
+import requests
 import json
 import datetime
 from datetime import date
@@ -11,7 +7,7 @@ from datetime import datetime
 import argparse
 import re
 from dateutil.parser import parse
-from tqdm import tqdm  # version 4.66.1
+from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
