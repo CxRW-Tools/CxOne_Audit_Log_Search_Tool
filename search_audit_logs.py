@@ -1,22 +1,29 @@
 import sys
 import requests
+import argparse
+import time
 import json
+
 import datetime
 from datetime import date
 from datetime import datetime
-import argparse
 import re
 from dateutil.parser import parse
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
+# Standard global variables
 base_url = None
 tenant_name = None
-debug = False
 auth_url = None
 iam_base_url = None
+api_key = None
 auth_token = None
+token_expiration = 0 # initialize so we have to authenticate
+debug = False
+
+# Global variables
 uuid_cache = {}
 uuid_cache_lock = Lock()
 
@@ -43,16 +50,20 @@ def generate_auth_url():
         print("Error: Invalid base_url provided.")
         sys.exit(1)
 
-def authenticate(api_key):
-    if auth_url is None:
-        return None
+def authenticate():
+    global auth_token, token_expiration
+
+    # if the token hasn't expired then we don't need to authenticate
+    if time.time() < token_expiration - 60:
+        if debug:
+            print("Token still valid.")
+        return
     
     if debug:
-        print("Authenticating with API...")
+        print("Authenticating with API key...")
         
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': f'Bearer {api_key}'
     }
     data = {
         'grant_type': 'refresh_token',
@@ -65,26 +76,29 @@ def authenticate(api_key):
         response.raise_for_status()
         
         json_response = response.json()
-        access_token = json_response.get('access_token')
-        
-        if not access_token:
+        auth_token = json_response.get('access_token')
+        if not auth_token:
             print("Error: Access token not found in the response.")
-            return None
+            sys.exit(1)
         
+        expires_in = json_response.get('expires_in')
+        
+        if not expires_in:
+            expires_in = 600
+
+        token_expiration = time.time() + expires_in
+
         if debug:
-            print("Successfully authenticated.")
-        
-        return access_token
+            print("Authenticated successfully.")
+      
     except requests.exceptions.RequestException as e:
         print(f"An error occurred during authentication: {e}")
         sys.exit(1)
 
 def fetch_audit_logs(start_date, end_date):
-    if auth_token is None:
-        return None
-    
     if debug:
         print("Fetching audit logs...")
+    authenticate()
 
     # Initialize tqdm object with the date range if debug is False
     pbar = tqdm(total=(end_date - start_date).days, desc="Retrieving events") if not debug else None
@@ -166,6 +180,10 @@ def fetch_audit_logs(start_date, end_date):
         sys.exit(1)
 
 def fetch_detailed_logs(url):
+    if debug:
+        print(f"Fetching detailed logs from {url}")
+    authenticate()
+
     try:
         headers = {'Authorization': f'Bearer {auth_token}'}
         response = requests.get(url, headers=headers)
@@ -173,16 +191,16 @@ def fetch_detailed_logs(url):
         json_response = response.json()
         
         if debug:
-            print(f"Fetched detailed logs from {url}")
+            print(f"Fetched detailed logs")
         
         return json_response
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred during fetching detailed logs: {e}")
+        print(f"An error occurred while fetching detailed logs: {e}")
         sys.exit(1)
 
 def apply_filters(logs, search_string=None):
     if debug:
-        print("Applying filters to logs...")
+        print("Applying filters to logs.}..")
         
     filtered_logs = {}
     
@@ -211,7 +229,8 @@ def is_uuid(value):
 def resolve_userid(uuid):
     if debug:
         print(f"Resolving UUID {uuid} as a userId")
-        
+    authenticate()
+
     try:
         # Construct the URL for the GET request
         user_url = f"{iam_base_url}/auth/admin/realms/{tenant_name}/users/{uuid}"
@@ -267,6 +286,7 @@ def resolve_userid(uuid):
 def resolve_groupid(uuid):
     if debug:
         print(f"Resolving UUID {uuid} as a groupId")
+    authenticate()
         
     try:
         # Construct the URL for the GET request
@@ -324,6 +344,8 @@ def resolve_groupid(uuid):
 def resolve_roleid(uuid):
     if debug:
         print(f"Resolving UUID {uuid} as a roleId")
+    authenticate()
+
     try:
         # Construct the URL for the GET request
         role_url = f"{iam_base_url}/auth/admin/realms/{tenant_name}/roles-by-id/{uuid}"
@@ -434,8 +456,15 @@ def output_logs(logs, raw=False, human_readable=False):
         return
 
     if human_readable:
+        pbar = tqdm(total=len(flat_logs), desc="Making human readable") if not debug else None
         for log in flat_logs:
             resolve_uuids_in_dict(log)
+            if pbar:
+                pbar.update(1)
+
+        # Close tqdm object
+        if pbar:
+            pbar.close()
 
     if raw:
         print(json.dumps(flat_logs, indent=4))
@@ -471,6 +500,7 @@ def main():
     global auth_url
     global auth_token
     global iam_base_url
+    global api_key
 
     parser = argparse.ArgumentParser(description='Search CxOne Audit Logs')
     parser.add_argument('--base_url', required=True, help='Region Base URL')
@@ -513,24 +543,16 @@ def main():
     
     tenant_name = args.tenant_name
     debug = args.debug
-    
-    if debug:
-        print("Starting the script...")
-
+    if args.iam_base_url:
+        iam_base_url = args.iam_base_url
+    api_key = args.api_key
     auth_url = generate_auth_url()
-    auth_token = authenticate(args.api_key)
-    
-    if auth_token is None:
-        return
 
     logs = fetch_audit_logs(start_date, end_date)
 
     filtered_logs = apply_filters(logs, search_string=args.search_string)
 
     output_logs(filtered_logs, raw=args.raw, human_readable=args.human_readable)
-    
-    if debug:
-        print("Script execution completed.")
 
 if __name__ == "__main__":
     main()
