@@ -106,6 +106,7 @@ def fetch_audit_logs(start_date, end_date):
     try:
         audit_url = f"{base_url}/api/audit/"
         headers = {'Accept': 'application/json', 'Authorization': f'Bearer {auth_token}'}
+
         response = requests.get(audit_url, headers=headers)
         response.raise_for_status()
         json_response = response.json()
@@ -139,9 +140,10 @@ def fetch_audit_logs(start_date, end_date):
                 event_date_str = link.get('eventDate')
                 event_date = parse(event_date_str).date()
                 found_links = True
+                url = link.get('url')
                 if debug:
-                    print(f"Requesting detailed logs for {event_date}")
-                future = executor.submit(fetch_detailed_logs, link.get('url'))
+                    print(f"Requesting detailed logs for {event_date} via {url}")
+                future = executor.submit(fetch_detailed_logs, url)
                 future_to_date[future] = event_date
 
             for future in as_completed(future_to_date):
