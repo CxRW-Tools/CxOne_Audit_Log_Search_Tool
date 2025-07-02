@@ -505,16 +505,16 @@ def main():
     global api_key
 
     parser = argparse.ArgumentParser(description='Search CxOne Audit Logs')
-    parser.add_argument('--base_url', required=True, help='Region Base URL')
-    parser.add_argument('--iam_base_url', required=False, help='Region IAM Base URL')
-    parser.add_argument('--tenant_name', required=True, help='Tenant name')
-    parser.add_argument('--api_key', required=True, help='API key for authentication')
-    parser.add_argument('--start_date', required=True, help='Start date in YYYY-MM-DD format')
-    parser.add_argument('--end_date', required=True, help='End date in YYYY-MM-DD format')
+    parser.add_argument('--base-url', required=True, help='Region Base URL')
+    parser.add_argument('--iam-base-url', required=False, help='Region IAM Base URL')
+    parser.add_argument('--tenant-name', required=True, help='Tenant name')
+    parser.add_argument('--api-key', required=True, help='API key for authentication')
+    parser.add_argument('--start-date', required=True, help='Start date in YYYY-MM-DD format')
+    parser.add_argument('--end-date', required=True, help='End date in YYYY-MM-DD format')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--search_string', required=False, help='Filter events containing specific strings')
+    parser.add_argument('--search-string', required=False, help='Filter events containing specific strings')
     parser.add_argument('--raw', action='store_true', help='Output raw logs')
-    parser.add_argument('--human_readable', action='store_true', help='Resolve UUIDs to human-readable strings')
+    parser.add_argument('--human-readable', action='store_true', help='Resolve UUIDs to human-readable strings')
 
     args = parser.parse_args()
     
