@@ -1,83 +1,112 @@
-# CxOne Audit Log Search Tool Usage Guide
+# CxOne Audit Log Search Tool
 
-## Summary
+Python CLI to search and export **Checkmarx One** audit events using the REST API **`GET /api/audit-events/`** (replaces the legacy `GET /api/audit/` flow). Events are retrieved for a date range (up to the **previous 365 days**), with optional filtering, human-readable UUID resolution, console output, and **CSV export**.
 
-The script is designed to search and fetch audit logs from the CxOne platform. It uses multi-threading to fetch detailed logs and offers various options for filtering and outputting the logs. The script also resolves UUIDs to human-readable strings for easier interpretation.
+The API is documented in the [Checkmarx One API Reference — Get a list of audit events](https://checkmarx.stoplight.io/docs/checkmarx-one-api-reference-guide/ofyf0dxa4e6w2-get-a-list-of-audit-events). Some tenants or regions may still be rolling out this endpoint; if calls fail, confirm availability in your environment.
 
-## Syntax and Arguments
+## Requirements
 
-Run the script using the following syntax:
-
-```bash
-python search_audit_logs.py --base_url BASE_URL --tenant_name TENANT_NAME --api_key API_KEY --start_date START_DATE --end_date END_DATE [OPTIONS]
-```
-
-### Required Arguments
-
-- `--base_url`: The base URL of the CxOne region.
-- `--tenant_name`: The name of the tenant.
-- `--api_key`: The API key used for authentication.
-- `--start_date`: The start date for fetching logs, in YYYY-MM-DD format.
-- `--end_date`: The end date for fetching logs, in YYYY-MM-DD format.
-
-### Optional Arguments
-
-- `--iam_base_url`: The IAM base URL of the CxOne region. If not provided, it will be generated based on the `base_url`.
-- `--debug`: Enable debug output. (Flag, no value required)
-- `--search_string`: A string to filter events. Only events containing this string will be included.
-- `--raw`: Output raw logs. (Flag, no value required)
-- `--human_readable`: Resolve UUIDs to human-readable strings. (Flag, no value required)
-
-## Usage Examples
-
-Fetch logs for a specific date range:
+- Python 3.9+
+- Dependencies: see [requirements.txt](requirements.txt)
 
 ```bash
-python search_audit_logs.py --base_url https://example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31
+pip install -r requirements.txt
 ```
 
-Fetch logs with debug output:
+## Configuration
+
+Copy [example.env](example.env) to `.env` and set:
+
+| Variable | Description |
+|----------|-------------|
+| `CXONE_BASE_URL` | Region base URL (e.g. `https://ast.checkmarx.net`) |
+| `CXONE_TENANT` | Tenant name |
+| `CXONE_API_KEY` | API key (refresh token used with `ast-app`) |
+| `CXONE_DEBUG` | `true` / `false` (optional) |
+| `CXONE_IAM_BASE_URL` | Override IAM host if needed (optional) |
+| `CXONE_OUTPUT_DIR` | Output directory for CSV and debug logs (optional, default `./output`) |
+| `CXONE_PAGE_SIZE` | Page size for audit requests (optional, max **1000**) |
+| `CXONE_START_DATE` | Start of range (optional), `YYYY-MM-DD` — use with `CXONE_END_DATE` to run without date flags |
+| `CXONE_END_DATE` | End of range (optional), `YYYY-MM-DD` |
+
+CLI arguments override `.env` values.
+
+## Usage
+
+The tool loads **`--env-file`** (default **`.env`**) on startup. Copy [example.env](example.env) to `.env` and set at least **credentials** and a **date range** (either in the file or on the command line).
 
 ```bash
-python search_audit_logs.py --base_url https://example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31 --debug
+python main.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD [options]
 ```
-
-Fetch logs and filter them by a specific string:
 
 ```bash
-python search_audit_logs.py --base_url https://example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31 --search_string "login"
+# Same thing if .env contains CXONE_START_DATE, CXONE_END_DATE, and credentials
+python main.py
 ```
 
-Fetch logs with a specified IAM base URL:
+### Required inputs (`.env` and/or CLI)
+
+- **Date range** — `CXONE_START_DATE` and `CXONE_END_DATE` in `.env`, **or** `--start-date` / `--end-date` on the CLI (inclusive `YYYY-MM-DD`; end dates in the future are capped to today).
+- **Credentials** — `CXONE_BASE_URL`, `CXONE_TENANT`, `CXONE_API_KEY` in `.env`, **or** the matching flags below.
+
+You can supply **base URL, tenant, and API key** via `.env` or:
+
+- `--base-url`
+- `--tenant-name`
+- `--api-key`
+
+### Optional arguments
+
+| Flag | Meaning |
+|------|---------|
+| `--env-file` | Path to env file (default `.env`) |
+| `--iam-base-url` | IAM base URL (default: derived from `ast` → `iam.checkmarx.net`) |
+| `--debug` | Verbose console output and a debug log file under the output directory |
+| `--search-string` | Keep only events whose full JSON serialization contains this substring |
+| `--raw` | Print events as JSON to stdout (see **CSV** below for interaction with `--csv`) |
+| `--human-readable` | Resolve UUIDs in event payloads via Keycloak admin APIs (users, groups, roles) |
+| `--csv` | Write a UTF-8 CSV under the output directory (`audit_events_<tenant>_<timestamp>.csv`) |
+| `--csv-path` | Explicit CSV file path |
+| `--print-events` | With `--csv`, also print formatted or raw events to stdout (default with `--csv` is summary only) |
+| `--output-dir` | Directory for CSV and debug logs |
+
+### Examples
 
 ```bash
-python search_audit_logs.py --base_url https://example.com --iam_base_url https://iam.example.com --tenant_name my_tenant --api_key my_api_key --start_date 2022-01-01 --end_date 2022-01-31
+# Load credentials from .env; fetch one week and print formatted events
+python main.py --start-date 2026-03-01 --end-date 2026-03-07
 ```
 
-## Output
+```bash
+# Filter, resolve UUIDs, export CSV (summary line only on the console)
+python main.py --base-url https://ast.checkmarx.net --tenant-name mytenant --api-key "$CXONE_API_KEY" ^
+  --start-date 2026-01-01 --end-date 2026-01-31 --search-string "project" --human-readable --csv
+```
 
-The script will output the fetched logs either in a human-readable format or as raw JSON, based on the options provided. It will also indicate if no logs were found for the specified date range.
+```bash
+# CSV plus JSON on stdout
+python main.py --start-date 2026-03-01 --end-date 2026-03-02 --csv --raw --print-events
+```
+
+## API behavior (summary)
+
+- **Endpoint:** `{CXONE_BASE_URL}/api/audit-events/`
+- **Headers:** `Authorization: Bearer <token>`, `Accept: application/json; version=1.0`
+- **Query:** `startDate`, `endDate` (RFC3339), `limit` (≤ 1000), `offset` — the tool **pages until all matching events** for the range are collected.
+- **Response:** JSON with `events[]` and `totalFilteredCount`.
+
+## CSV columns
+
+When using `--csv`, each row includes:
+
+`eventID`, `eventDate`, `eventType`, `auditResource`, `actionType`, `actionUserId`, `ipAddress`, and **`data`** (JSON string of the event payload). If **`--human-readable`** is also set, UUID resolution is applied before export, so CSV reflects resolved names where applicable.
+
+## Project layout
+
+- [main.py](main.py) — CLI entrypoint
+- [src/utils/](src/utils/) — config, auth, API client, CSV, file/debug helpers
+- [src/operations/](src/operations/) — audit fetch and UUID resolution
 
 ## License
 
-MIT License
-
-Copyright (c) 2024
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+MIT License — see [LICENSE](LICENSE).
