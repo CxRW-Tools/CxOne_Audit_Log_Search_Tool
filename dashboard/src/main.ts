@@ -1,6 +1,6 @@
 import './theme.css';
 import { loadFromUrl, loadFromFile } from './loader.js';
-import { setData, scopeSummary, isFilterActive, getFilter } from './state.js';
+import { setData, scopeSummary } from './state.js';
 import type { Dataset, DecodedEvent } from './types.js';
 import { renderKpis } from './components/kpis.js';
 import { initBreadcrumb, renderBreadcrumb } from './components/breadcrumb.js';
@@ -103,15 +103,36 @@ async function init(): Promise<void> {
   wireDragDrop('file-drop-zone');
   wireDragDrop('error-file-label');
 
+  // Only auto-fetch when an explicit ?data= URL is provided
   const params = new URLSearchParams(window.location.search);
-  const dataUrl = params.get('data') ?? './data/audit.json';
+  const dataUrl = params.get('data');
 
-  try {
-    const { dataset, events } = await loadFromUrl(dataUrl);
-    mountDashboard(dataset, events);
-  } catch (err) {
-    showError(`Could not fetch <code>${dataUrl}</code>: ${String(err)}`);
+  if (dataUrl) {
+    try {
+      const { dataset, events } = await loadFromUrl(dataUrl);
+      mountDashboard(dataset, events);
+    } catch (err) {
+      showError(`Could not fetch <code>${dataUrl}</code>: ${String(err)}`);
+    }
+  } else {
+    showLanding();
   }
+}
+
+function showLanding(): void {
+  document.getElementById('loading-state')!.style.display = 'none';
+  document.getElementById('dashboard')!.style.display = 'none';
+  document.getElementById('error-state')!.style.display = 'flex';
+  const p = document.querySelector('#error-state p')!;
+  p.innerHTML = `Drop a <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.`;
+
+  // Full-page drop target while on landing screen
+  document.body.addEventListener('dragover', (e) => e.preventDefault());
+  document.body.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files[0];
+    if (file) handleFileLoad(file);
+  });
 }
 
 init();

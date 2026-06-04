@@ -14,13 +14,12 @@
       <p>Loading audit data…</p>
     </div>
 
-    <!-- Error state -->
+    <!-- Landing / error state -->
     <div id="error-state" style="display:none">
-      <div class="error-icon">⚠</div>
-      <p><strong>Failed to load audit data.</strong><br>
-      Drop a <code>.json</code> or <code>.log</code> file below to load data manually.</p>
-      <label class="file-drop-zone" id="error-file-label">
-        📂 Load file
+      <div class="error-icon">📂</div>
+      <p>Drop a <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.</p>
+      <label class="file-drop-zone file-drop-zone-large" id="error-file-label">
+        📂 Load file (.json / .log)
         <input type="file" id="error-file-input" accept=".json,.log,.txt" />
       </label>
     </div>

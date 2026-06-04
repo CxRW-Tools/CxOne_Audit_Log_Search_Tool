@@ -319,6 +319,13 @@ body::before {
 }
 .show-more-btn:hover { border-color: var(--cx-violet); background: rgba(107,52,253,0.1); }
 
+.file-drop-zone-large {
+  padding: 14px 32px;
+  font-size: 14px;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
 .empty-state {
   text-align: center;
   padding: 40px;
