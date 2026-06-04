@@ -7,7 +7,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
-      input: 'index.html',
+      input: 'CxOne_Audit_Log_Dashboard.html',
     },
   },
   test: {
