@@ -1,8 +1,8 @@
 import './theme.css';
 import { loadFromUrl, loadFromFile } from './loader.js';
-import { setData, scopeSummary } from './state.js';
+import { setData, scopeSummary, getFilter } from './state.js';
 import type { Dataset, DecodedEvent } from './types.js';
-import { renderKpis } from './components/kpis.js';
+import { renderKpis, initKpis } from './components/kpis.js';
 import { initBreadcrumb, renderBreadcrumb } from './components/breadcrumb.js';
 import { initDrillChart, renderDrillChart } from './components/drillChart.js';
 import { initActorChart, renderActorChart } from './components/actorChart.js';
@@ -14,6 +14,8 @@ let _allEvents: DecodedEvent[] = [];
 
 function refresh(): void {
   resetEventLogPage();
+  syncSearchInput();
+  renderKpis(_allEvents);
   renderBreadcrumb();
   renderScopeSummary();
   renderDrillChart();
@@ -21,6 +23,12 @@ function refresh(): void {
   renderTrendChart();
   renderHourChart();
   renderEventLog();
+}
+
+// Keep the search input text in sync when q is set programmatically (e.g. KPI click)
+function syncSearchInput(): void {
+  const el = document.getElementById('search-input') as HTMLInputElement | null;
+  if (el) el.value = getFilter().q;
 }
 
 function renderScopeSummary(): void {
@@ -45,7 +53,7 @@ function mountDashboard(dataset: Dataset, events: DecodedEvent[]): void {
     if (titleEl) titleEl.textContent = `Audit Log Dashboard · ${dataset.meta.tenant}`;
   }
 
-  renderKpis(_allEvents);
+  initKpis(refresh);
   initBreadcrumb(refresh);
   initDrillChart(refresh);
   initActorChart(refresh);

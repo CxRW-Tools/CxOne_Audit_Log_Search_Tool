@@ -208,6 +208,11 @@ body::before {
 .kpi-value { font-size: 28px; font-weight: 700; color: var(--cx-white); line-height: 1; }
 .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
+.kpi-card { cursor: pointer; transition: background 0.15s, box-shadow 0.15s, transform 0.1s; }
+.kpi-card:hover { background: var(--panel2); transform: translateY(-1px); }
+.kpi-card.kpi-active { background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18); }
+.kpi-card.kpi-active .kpi-label { color: var(--cx-white); }
+
 /* ── Chart grid ── */
 .chart-grid-top {
   display: grid;
