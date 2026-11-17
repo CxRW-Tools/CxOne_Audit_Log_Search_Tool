@@ -1,6 +1,9 @@
-import sys
 import time
 import requests
+
+
+class AuthError(RuntimeError):
+    """Raised when the API key cannot be exchanged for an access token."""
 
 
 class AuthManager:
@@ -47,8 +50,8 @@ class AuthManager:
             if self.debug:
                 print("Authentication successful")
         except (requests.exceptions.RequestException, ValueError) as e:
-            print("Authentication error:", e)
-            sys.exit(1)
+            # Raise rather than exit so long-running callers (--serve) survive a bad token.
+            raise AuthError(f"Authentication error: {e}") from e
 
     def get_headers(self):
         return {

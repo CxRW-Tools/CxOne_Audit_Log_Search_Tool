@@ -2,6 +2,7 @@
 """
 CxOne Audit Log Search Tool — fetch audit events via GET /api/audit-events/,
 filter, optional human-readable UUID resolution, console and/or CSV export.
+With --serve, runs a local web server hosting the Audit Log Dashboard with a query bar.
 """
 
 import argparse
@@ -9,13 +10,9 @@ import json
 import os
 import sys
 import time
-from datetime import date, datetime
 
-from src.operations.audit_events_collector import AuditEventsCollector
-from src.operations.uuid_resolver import UuidResolver
-from src.utils.api_client import APIClient
-from src.utils.audit_output import filter_events, print_formatted_events, sort_events
-from src.utils.auth import AuthManager
+from src.pipeline import QueryContext, parse_date_range, run_query
+from src.utils.audit_output import print_formatted_events
 from src.utils.config import Config
 from src.utils.csv_export import write_audit_events_csv
 from src.utils.debug_logger import DebugLogger
@@ -59,6 +56,19 @@ def parse_args():
         help="With --csv, also print formatted or raw events to stdout (default: summary only)",
     )
     p.add_argument("--output-dir", help="Output directory for CSV and debug logs (default: ./output)")
+
+    serve = p.add_argument_group("web dashboard")
+    serve.add_argument(
+        "--serve",
+        action="store_true",
+        help="Run a local web server (127.0.0.1) hosting the Audit Log Dashboard with a query bar",
+    )
+    serve.add_argument("--port", type=int, default=8765, help="Port for --serve (default: 8765; 0 = any free port)")
+    serve.add_argument("--no-browser", action="store_true", help="With --serve, don't open a browser automatically")
+    serve.add_argument(
+        "--dashboard-html",
+        help="With --serve, path to CxOne_Audit_Log_Dashboard.html (default: web/ next to main.py)",
+    )
     return p.parse_args()
 
 
@@ -83,19 +93,42 @@ def _print_missing_date_help(env_file: str):
 
 def parse_dates(start_s: str, end_s: str):
     try:
-        start_date = datetime.strptime(start_s, "%Y-%m-%d").date()
-        end_date = datetime.strptime(end_s, "%Y-%m-%d").date()
-    except ValueError:
-        print("Error: Invalid date format. Use YYYY-MM-DD.")
+        return parse_date_range(start_s, end_s)
+    except ValueError as e:
+        print("Configuration error:", e)
         sys.exit(1)
-    today = date.today()
-    if end_date > today:
-        end_date = today
-    ok, err = Config.validate_date_range(start_date, end_date)
-    if not ok:
-        print("Configuration error:", err)
+
+
+def run_server(args, config):
+    from src.server import serve
+
+    print("=" * 120)
+    print("CxOne Audit Log Search — dashboard server")
+    print("=" * 120)
+    print("Tenant:", config.tenant_name)
+    print("Base URL:", config.base_url)
+    print("=" * 120)
+
+    debug_logger = None
+    if config.debug:
+        file_manager = FileManager(config, config.debug)
+        file_manager.setup_directories()
+        dbg_path = file_manager.get_standalone_debug_log_path()
+        debug_logger = DebugLogger(dbg_path, console_debug=True)
+        debug_logger.log("CxOne Audit Log Search — serve debug log")
+        print("Debug log:", os.path.abspath(dbg_path))
+
+    try:
+        ctx = QueryContext(config, debug_logger)
+        ctx.authenticate()  # fail fast on bad credentials
+        print("Authenticated with CxOne")
+        serve(ctx, html_path=args.dashboard_html, port=args.port, open_browser=not args.no_browser)
+    except Exception as e:
+        print("\nError:", e)
         sys.exit(1)
-    return start_date, end_date
+    finally:
+        if debug_logger:
+            debug_logger.close()
 
 
 def main():
@@ -115,6 +148,14 @@ def main():
         config.debug = True
     if args.output_dir:
         config.output_directory = args.output_dir
+
+    if args.serve:
+        ok, err = config.validate()
+        if not ok:
+            print("Configuration error:", err)
+            sys.exit(1)
+        run_server(args, config)
+        return
 
     start_s = args.start_date or config.start_date
     end_s = args.end_date or config.end_date
@@ -138,14 +179,6 @@ def main():
     print("Output directory:", config.output_directory)
     print("=" * 120)
 
-    auth_manager = AuthManager(
-        base_url=config.base_url,
-        tenant_name=config.tenant_name,
-        api_key=config.api_key,
-        iam_base_url=config.iam_base_url,
-        debug=config.debug,
-    )
-
     file_manager = FileManager(config, config.debug)
     file_manager.setup_directories()
 
@@ -157,44 +190,19 @@ def main():
         debug_logger.log("CxOne Audit Log Search — debug log")
 
     try:
-        auth_manager.ensure_authenticated()
+        ctx = QueryContext(config, debug_logger)
+        ctx.authenticate()
         if config.debug:
             print("\nAuthenticated with CxOne")
 
-        api_client = APIClient(
-            config.base_url,
-            auth_manager,
-            config,
-            config.debug,
-            debug_logger,
+        events = run_query(
+            ctx,
+            start_date,
+            end_date,
+            search_string=args.search_string,
+            human_readable=args.human_readable,
+            stages=StageTracker(config.debug),
         )
-
-        stages = StageTracker(config.debug)
-        stages.start_stage("Stage 1: Fetch audit events")
-        collector = AuditEventsCollector(
-            config,
-            auth_manager,
-            api_client=api_client,
-            progress=None,
-            debug_logger=debug_logger,
-        )
-        events = collector.execute(start_date, end_date)
-        stages.end_stage("Stage 1: Fetch audit events", events_fetched=len(events))
-
-        events = filter_events(events, args.search_string)
-        events = sort_events(events)
-
-        if args.human_readable:
-            stages.start_stage("Stage 2: Resolve UUIDs (human-readable)")
-            resolver = UuidResolver(
-                auth_manager,
-                api_client,
-                config.tenant_name,
-                debug=config.debug,
-            )
-            for ev in events:
-                resolver.resolve_in_event(ev)
-            stages.end_stage("Stage 2: Resolve UUIDs (human-readable)", events=len(events))
 
         csv_path = None
         if args.csv:

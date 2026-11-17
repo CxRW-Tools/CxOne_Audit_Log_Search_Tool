@@ -2,6 +2,8 @@
 
 Python CLI to search and export **Checkmarx One** audit events using the REST API **`GET /api/audit-events/`** (replaces the legacy `GET /api/audit/` flow). Events are retrieved for a date range (up to the **previous 365 days**), with optional filtering, human-readable UUID resolution, console output, and **CSV export**.
 
+It can also run as a **local web dashboard** (`--serve`): query your tenant from the browser and explore the results in the [CxOne Audit Log Dashboard](https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer). See [Web dashboard](#web-dashboard---serve).
+
 The API is documented in the [Checkmarx One API Reference — Get a list of audit events](https://checkmarx.stoplight.io/docs/checkmarx-one-api-reference-guide/ofyf0dxa4e6w2-get-a-list-of-audit-events). Some tenants or regions may still be rolling out this endpoint; if calls fail, confirm availability in your environment.
 
 ## Requirements
@@ -88,6 +90,27 @@ python main.py --base-url https://ast.checkmarx.net --tenant-name mytenant --api
 python main.py --start-date 2026-03-01 --end-date 2026-03-02 --csv --raw --print-events
 ```
 
+## Web dashboard (`--serve`)
+
+```bash
+python main.py --serve
+```
+
+This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range, optionally a search string, and click **Run query**. The results load into the interactive dashboard (KPIs, drill-down by category / event type / actor, timeline, hourly distribution, event log). You can run as many queries as you like; press **Ctrl+C** in the terminal to stop.
+
+Only credentials are required (from `.env` or the CLI flags); dates are chosen in the browser. Queries run the same pipeline as the CLI, so `--search-string` and `--human-readable` behave identically (the **Resolve names** checkbox, on by default). Name lookups are cached for the life of the server, so later queries are faster.
+
+| Flag | Meaning |
+|------|---------|
+| `--serve` | Run the local web dashboard |
+| `--port` | Port to listen on (default `8765`; `0` picks a free port) |
+| `--no-browser` | Don't open a browser automatically |
+| `--dashboard-html` | Serve a different build of `CxOne_Audit_Log_Dashboard.html` (default: [web/](web/)) |
+
+**Security:** the server listens on `127.0.0.1` only and your API key never leaves the Python process — the browser only receives audit events. Requests must carry a random per-run token that is embedded in the served page, and requests with a non-local `Host` header are rejected, so other websites open in your browser can't query it. Anyone with access to your machine's loopback interface while it runs (for example other users on a shared host) could load the page, so stop it when you're done.
+
+The dashboard file in [web/](web/) is a build artifact of the Visualizer repo. To update it, run `npm run build && npm run sync:search-tool` there.
+
 ## API behavior (summary)
 
 - **Endpoint:** `{CXONE_BASE_URL}/api/audit-events/`
@@ -104,8 +127,12 @@ When using `--csv`, each row includes:
 ## Project layout
 
 - [main.py](main.py) — CLI entrypoint
+- [src/pipeline.py](src/pipeline.py) — shared query pipeline (fetch → filter → sort → resolve) used by the CLI and `--serve`
+- [src/server.py](src/server.py) — local web server for `--serve`
 - [src/utils/](src/utils/) — config, auth, API client, CSV, file/debug helpers
 - [src/operations/](src/operations/) — audit fetch and UUID resolution
+- [web/](web/) — bundled dashboard HTML served by `--serve`
+- [tests/](tests/) — `python -m unittest discover -s tests -t .` (no credentials needed)
 
 ## License
 
