@@ -1,84 +1,252 @@
-import type { Dataset, DecodedEvent } from './types.js';
+import type { Dataset, DecodedEvent, TimeZoneMode } from './types.js';
+import { applyTimeZone } from './loader.js';
+import { fmtValue } from './format.js';
+
+// ── Fields ──────────────────────────────────────────────────────────────────
+
+/** Filterable fields. `data.<key>` addresses a key in the event payload. */
+export type FieldKey = 'ip' | 'action' | 'resource' | 'id' | 'user' | 'type' | 'cat' | `data.${string}`;
+
+export function getField(e: DecodedEvent, field: FieldKey): string | undefined {
+  switch (field) {
+    case 'ip':
+      return e.ip;
+    case 'action':
+      return e.action;
+    case 'resource':
+      return e.resource;
+    case 'id':
+      return e.id;
+    case 'user':
+      return e.user;
+    case 'type':
+      return e.type;
+    case 'cat':
+      return e.cat;
+    default: {
+      const v = e.data[field.slice(5)];
+      return v === undefined || v === null ? undefined : fmtValue(v);
+    }
+  }
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  ip: 'IP',
+  action: 'Action',
+  resource: 'Resource',
+  id: 'Event ID',
+  user: 'Actor',
+  type: 'Event type',
+  cat: 'Category',
+  'data.status': 'Status',
+  'data.projectName': 'Project',
+};
+
+export function fieldLabel(field: FieldKey): string {
+  return FIELD_LABELS[field] ?? field.replace(/^data\./, '');
+}
+
+// ── Filter state ────────────────────────────────────────────────────────────
+
+export interface Facet {
+  field: FieldKey;
+  value: string;
+  /** true = hide events with this value; false = keep only events with it. */
+  exclude: boolean;
+}
+
+/** A precomputed set of events (from the Highlights panel). */
+export interface HighlightFilter {
+  id: string;
+  label: string;
+  ids: Set<number>;
+}
 
 export interface FilterState {
   cat: string | null;
   type: string | null;
   user: string | null;
   day: string | null;
+  hour: number | null;
   q: string;
+  facets: Facet[];
+  highlight: HighlightFilter | null;
 }
 
 export type DrillLevel = 'category' | 'eventType' | 'actor' | 'leaf';
 
+const EMPTY: FilterState = { cat: null, type: null, user: null, day: null, hour: null, q: '', facets: [], highlight: null };
+
 let _dataset: Dataset | null = null;
 let _events: DecodedEvent[] = [];
-let _filter: FilterState = { cat: null, type: null, user: null, day: null, q: '' };
+let _filter: FilterState = { ...EMPTY };
+let _tz: TimeZoneMode = 'utc';
+/** Comparison: events at/after this instant are the current period, earlier ones the previous. */
+let _compareSplit: number | null = null;
+/** Bumped on any change (filters, data, time zone, comparison). */
+let _version = 0;
+/** Bumped only when the data, time zone or comparison changes — not on filter changes. */
+let _dataVersion = 0;
+const bump = () => {
+  _version++;
+};
+const bumpData = () => {
+  _dataVersion++;
+  _version++;
+};
 
 export function setData(dataset: Dataset, events: DecodedEvent[]): void {
   _dataset = dataset;
   _events = events;
-  _filter = { cat: null, type: null, user: null, day: null, q: '' };
+  _filter = { ...EMPTY, facets: [] };
+  _compareSplit = null;
+  bumpData();
 }
 
 export function getDataset(): Dataset | null {
   return _dataset;
 }
 
+export function allEvents(): DecodedEvent[] {
+  return _events;
+}
+
 export function getFilter(): FilterState {
-  return { ..._filter };
+  return { ..._filter, facets: [..._filter.facets] };
 }
 
 export function setFilter(update: Partial<FilterState>): void {
   _filter = { ..._filter, ...update };
+  bump();
 }
 
 export function resetFilter(): void {
-  _filter = { cat: null, type: null, user: null, day: null, q: '' };
+  _filter = { ...EMPTY, facets: [] };
+  bump();
 }
 
 export function isFilterActive(): boolean {
-  return !!(
-    _filter.cat || _filter.type || _filter.user || _filter.day || _filter.q
-  );
+  const f = _filter;
+  return !!(f.cat || f.type || f.user || f.day || f.hour !== null || f.q || f.facets.length || f.highlight);
 }
 
-export type ExceptDim = 'cat' | 'type' | 'user' | 'day' | null;
-
-function matchesSearch(e: DecodedEvent, q: string): boolean {
-  const lower = q.toLowerCase();
-  return (
-    e.type.toLowerCase().includes(lower) ||
-    e.cat.toLowerCase().includes(lower) ||
-    e.user.toLowerCase().includes(lower) ||
-    JSON.stringify(e.data).toLowerCase().includes(lower)
-  );
+/** Add an include/exclude field filter (replacing an existing one for the same field+value). */
+export function addFacet(facet: Facet): void {
+  const facets = _filter.facets.filter((x) => !(x.field === facet.field && x.value === facet.value));
+  // Only one include per field makes sense (AND of two different values is always empty).
+  const cleaned = facet.exclude ? facets : facets.filter((x) => !(x.field === facet.field && !x.exclude));
+  setFilter({ facets: [...cleaned, facet] });
 }
 
-export function rows(except: ExceptDim = null): DecodedEvent[] {
-  return _events.filter((e) => {
-    if (except !== 'cat' && _filter.cat && e.cat !== _filter.cat) return false;
-    if (except !== 'type' && _filter.type && e.type !== _filter.type) return false;
-    if (except !== 'user' && _filter.user && e.user !== _filter.user) return false;
-    if (except !== 'day' && _filter.day && e.day !== _filter.day) return false;
-    if (_filter.q && !matchesSearch(e, _filter.q)) return false;
-    return true;
+export function removeFacet(index: number): void {
+  setFilter({ facets: _filter.facets.filter((_, i) => i !== index) });
+}
+
+// ── Time zone & comparison ──────────────────────────────────────────────────
+
+export function getTimeZone(): TimeZoneMode {
+  return _tz;
+}
+
+/** Switch display time zone. Day/hour filters are cleared because their meaning changes. */
+export function setTimeZone(tz: TimeZoneMode): void {
+  if (tz === _tz) return;
+  _tz = tz;
+  applyTimeZone(_events, tz);
+  _filter = { ..._filter, day: null, hour: null };
+  bumpData();
+}
+
+export function getCompareSplit(): number | null {
+  return _compareSplit;
+}
+
+export function setCompareSplit(split: number | null): void {
+  _compareSplit = split;
+  _filter = { ..._filter, day: null }; // the selected day may not exist in the new current period
+  bumpData();
+}
+
+/** Split point that divides the loaded data into two equal whole-day halves (UTC), or null if < 2 days. */
+export function midpointSplit(): number | null {
+  if (!_dataset?.meta.dateMin) return null;
+  const start = Date.parse(_dataset.meta.dateMin + 'T00:00:00Z');
+  const end = Date.parse(_dataset.meta.dateMax + 'T00:00:00Z');
+  const days = Math.round((end - start) / 86400000) + 1;
+  if (days < 2) return null;
+  return start + Math.floor(days / 2) * 86400000;
+}
+
+/** Events in the current period (all events unless comparing). */
+export function periodEvents(): DecodedEvent[] {
+  return cachedData('period', () => (_compareSplit === null ? _events : _events.filter((e) => e.epoch >= _compareSplit!)));
+}
+
+/** Events in the previous period (empty unless comparing). */
+export function previousPeriodEvents(): DecodedEvent[] {
+  return cachedData('prev', () => (_compareSplit === null ? [] : _events.filter((e) => e.epoch < _compareSplit!)));
+}
+
+// ── Filtering ───────────────────────────────────────────────────────────────
+
+export function matches(e: DecodedEvent, f: FilterState, q = f.q.trim().toLowerCase()): boolean {
+  if (f.highlight && !f.highlight.ids.has(e.idx)) return false;
+  if (f.cat && e.cat !== f.cat) return false;
+  if (f.type && e.type !== f.type) return false;
+  if (f.user && e.user !== f.user) return false;
+  if (f.day && e.day !== f.day) return false;
+  if (f.hour !== null && e.hour !== f.hour) return false;
+  for (const facet of f.facets) {
+    const has = getField(e, facet.field) === facet.value;
+    if (facet.exclude ? has : !has) return false;
+  }
+  if (q && !e.search.includes(q)) return false;
+  return true;
+}
+
+/** Filtered events in the current period. Cached until the filter or data changes. */
+export function rows(): DecodedEvent[] {
+  return memo('rows', () => {
+    const f = _filter;
+    const q = f.q.trim().toLowerCase();
+    return periodEvents().filter((e) => matches(e, f, q));
   });
 }
 
-export function countBy<K extends string>(
-  events: DecodedEvent[],
-  key: (e: DecodedEvent) => K,
-  topN?: number
-): Map<K, number> {
+/** Same filters applied to the previous period (for comparison overlays). */
+export function previousRows(): DecodedEvent[] {
+  return memo('prevRows', () => {
+    const f = { ..._filter, day: null }; // a day filter can't apply to the other period
+    const q = f.q.trim().toLowerCase();
+    return previousPeriodEvents().filter((e) => matches(e, f, q));
+  });
+}
+
+const _memo = new Map<string, { v: number; value: unknown }>();
+function memoAt<T>(key: string, version: number, compute: () => T): T {
+  const hit = _memo.get(key);
+  if (hit && hit.v === version) return hit.value as T;
+  const value = compute();
+  _memo.set(key, { v: version, value });
+  return value;
+}
+const memo = <T>(key: string, compute: () => T) => memoAt(key, _version, compute);
+
+/** Cache derived values (sorted rows, chart series) until the filter or data changes. */
+export function cached<T>(key: string, compute: () => T): T {
+  return memoAt('ext:' + key, _version, compute);
+}
+
+/** Cache values that depend only on the data, time zone and comparison (not on filters). */
+export function cachedData<T>(key: string, compute: () => T): T {
+  return memoAt('data:' + key, _dataVersion, compute);
+}
+
+export function countBy<K extends string>(events: DecodedEvent[], key: (e: DecodedEvent) => K): Map<K, number> {
   const map = new Map<K, number>();
   for (const e of events) {
     const k = key(e);
     map.set(k, (map.get(k) ?? 0) + 1);
-  }
-  if (topN !== undefined) {
-    // Keep only top N by count
-    const sorted = Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-    return new Map(sorted.slice(0, topN));
   }
   return map;
 }
@@ -121,7 +289,7 @@ export function scopeSummary(): {
 
   return {
     count: scoped.length,
-    total: _dataset.meta.total,
+    total: periodEvents().length,
     eventTypes: typeSet.size,
     namedActors: actorSet.size,
     activeDays: daySet.size,

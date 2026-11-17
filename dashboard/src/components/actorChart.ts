@@ -1,16 +1,8 @@
-import {
-  Chart,
-  BarController,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-} from 'chart.js';
-import { rows, setFilter, getFilter, countBy } from '../state.js';
-import { getDataset } from '../state.js';
-import { truncate } from './chartUtils.js';
-
-Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip);
+import type { Chart } from 'chart.js';
+import { rows, setFilter, getFilter, countBy, getDataset } from '../state.js';
+import { actorShort } from '../format.js';
+import { isNamed } from '../parser.js';
+import { COLORS, axisStyle, describeChart, restTooltip, summarize, topWithRest, upsertChart } from './chartUtils.js';
 
 let _chart: Chart | null = null;
 let _cb: () => void = () => {};
@@ -21,67 +13,60 @@ export function initActorChart(cb: () => void): void {
 
 export function renderActorChart(): void {
   const canvas = document.getElementById('actor-canvas') as HTMLCanvasElement | null;
-  if (!canvas) return;
-
-  const ds = getDataset();
-  if (!ds) return;
+  const hintEl = document.getElementById('actor-hint');
+  if (!canvas || !getDataset()) return;
 
   const f = getFilter();
   const scoped = rows();
-
-  // Only named actors
-  const named = new Set(
-    ds.users.filter((_, i) => ds.named[i] === 1)
-  );
-
   const counts = countBy(scoped, (e) => e.user);
-  const entries = Array.from(counts.entries())
-    .filter(([u]) => named.has(u))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12);
+  const buckets = topWithRest(counts, 12, (k) => actorShort(k, 26));
+  const anyNamed = buckets.some((b) => b.key && isNamed(b.key));
 
-  if (_chart) {
-    _chart.destroy();
-    _chart = null;
+  // Unresolved IDs and system are included (muted) so the chart is never silently empty.
+  const colors = buckets.map((b) => {
+    if (!b.key) return COLORS.rest;
+    if (b.key === f.user) return COLORS.orange;
+    return isNamed(b.key) ? COLORS.violet : COLORS.muted;
+  });
+
+  if (hintEl) {
+    hintEl.textContent = !scoped.length
+      ? 'Actors by event count.'
+      : anyNamed
+        ? 'Actors by event count. Click to filter; grey bars are unresolved IDs or system.'
+        : 'Names weren’t resolved, so actors are user IDs. Re-run with “Resolve names” (or --human-readable) to see names.';
   }
 
-  const ctx = canvas.getContext('2d')!;
-  const labels = entries.map(([k]) => k);
-  const values = entries.map(([, v]) => v);
-  const colors = labels.map((l) =>
-    l === f.user ? '#F25929' : '#6B34FD'
-  );
-
-  _chart = new Chart(ctx, {
+  _chart = upsertChart(_chart, canvas, {
     type: 'bar',
     data: {
-      labels: labels.map((l) => truncate(l, 25)),
-      datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }],
+      labels: buckets.map((b) => b.label),
+      datasets: [{ data: buckets.map((b) => b.value), backgroundColor: colors, borderRadius: 4 }],
     },
     options: {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            title: (items) => labels[items[0].dataIndex] ?? '',
+            title: (items) => buckets[items[0].dataIndex]?.key ?? buckets[items[0].dataIndex]?.label ?? '',
             label: (ctx) => ` ${(ctx.raw as number).toLocaleString()} events`,
+            afterBody: (items) => restTooltip(buckets[items[0].dataIndex]),
           },
         },
       },
-      scales: {
-        x: { ticks: { color: '#a99fc0' }, grid: { color: '#3a2a52' } },
-        y: { ticks: { color: '#FCF9FE', font: { size: 11 } } },
-      },
+      scales: axisStyle,
       onClick: (_evt, elements) => {
-        if (!elements.length) return;
-        const idx = elements[0].index;
-        const user = labels[idx];
-        setFilter({ user: f.user === user ? null : user });
+        const b = elements.length ? buckets[elements[0].index] : undefined;
+        if (!b?.key) return;
+        setFilter({ user: f.user === b.key ? null : b.key });
         _cb();
       },
     },
   });
+
+  describeChart(canvas, `Top actors: ${summarize(buckets)}`, scoped.length === 0);
 }

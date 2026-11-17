@@ -1,24 +1,43 @@
-import type { Dataset } from './types.js';
+import type { Dataset, EventData, EventExtra } from './types.js';
+import { isUuid, UNRESOLVED } from './format.js';
 
 const CATEGORY_MAP: Record<string, string> = {
   users: 'Identity & Auth',
+  user: 'Identity & Auth',
   mfa: 'Identity & Auth',
   'identity-provider': 'Identity & Auth',
   'oauth2-client': 'Identity & Auth',
   realm: 'Identity & Auth',
+  'api-keys': 'Identity & Auth',
+  'api-key': 'Identity & Auth',
+  clients: 'Identity & Auth',
   role: 'Access Control',
+  roles: 'Access Control',
   groups: 'Access Control',
+  group: 'Access Control',
   assignment: 'Access Control',
+  assignments: 'Access Control',
   scans: 'Scanning',
+  scan: 'Scanning',
   'sca-results': 'Scanning',
+  results: 'Scanning',
   'source-code': 'Data Access',
   'contributing-developers': 'Data Access',
+  reports: 'Data Access',
   projects: 'Project Mgmt',
+  project: 'Project Mgmt',
   'project-settings': 'Project Mgmt',
   applications: 'Project Mgmt',
+  application: 'Project Mgmt',
   environment: 'Config',
   'tenant-settings': 'Config',
+  tenant: 'Config',
   link: 'Config',
+  webhooks: 'Config',
+  webhook: 'Config',
+  presets: 'Config',
+  policies: 'Config',
+  queries: 'Config',
 };
 
 export function categoryFor(eventType: string): string {
@@ -26,27 +45,30 @@ export function categoryFor(eventType: string): string {
   return CATEGORY_MAP[prefix] ?? 'Other';
 }
 
+/**
+ * Normalize the exported actor. The full "First Last (username)" form is kept so two people
+ * with the same display name stay separate and the username stays searchable; bare user IDs
+ * are kept whole (charts shorten them for display only).
+ */
 export function actorLabel(actionUser: string): string {
   const trimmed = actionUser.trim();
-  if (!trimmed || trimmed === 'Unresolved User ID') return 'Unresolved / System';
-  const match = trimmed.match(/^(.*) \(.*\)$/);
-  if (match) return match[1].trim();
-  // bare UUID or unrecognized
-  return trimmed.slice(0, 8) + '…';
+  if (!trimmed || trimmed === 'Unresolved User ID' || trimmed === 'N/A') return UNRESOLVED;
+  return trimmed;
 }
 
+/** True for resolved people/service accounts; false for system and bare IDs. */
 export function isNamed(label: string): boolean {
-  return label !== 'Unresolved / System' && !label.includes('…');
+  return label !== UNRESOLVED && !isUuid(label);
 }
 
 const SEPARATOR = '----------------------------------------';
-export const MAX_VAL_LEN = 120;
 
 export interface RawEvent {
   ts: string;
   eventType: string;
   actorLabel: string;
-  data: Record<string, string>;
+  data: EventData;
+  extra?: EventExtra;
 }
 
 export function parseAuditLog(text: string): Dataset {
@@ -69,26 +91,21 @@ export function parseAuditLog(text: string): Dataset {
         currentBlock = [];
       }
       headerDone = true;
+    } else if (!headerDone) {
+      if (line.startsWith('Tenant:')) tenant = line.slice(7).trim();
+      if (line.startsWith('Base URL:')) baseUrl = line.slice(9).trim();
     } else {
-      if (!headerDone) {
-        // Parse header metadata
-        if (line.startsWith('Tenant:')) tenant = line.slice(7).trim();
-        if (line.startsWith('Base URL:')) baseUrl = line.slice(9).trim();
-      } else {
-        currentBlock.push(line);
-      }
+      currentBlock.push(line);
     }
   }
   if (currentBlock.length > 0) blocks.push(currentBlock);
 
-  // Parse each block into raw event tuples
   const rawEvents: RawEvent[] = [];
-
   for (const block of blocks) {
     let ts = '';
     let eventType = '';
     let actor = '';
-    const data: Record<string, string> = {};
+    const data: EventData = {};
     let inData = false;
 
     for (const line of block) {
@@ -103,20 +120,13 @@ export function parseAuditLog(text: string): Dataset {
       } else if (inData && line.startsWith('  ')) {
         const inner = line.slice(2);
         const colonIdx = inner.indexOf(':');
-        if (colonIdx > 0) {
-          const key = inner.slice(0, colonIdx).trim();
-          let val = inner.slice(colonIdx + 1).trim();
-          if (val.length > MAX_VAL_LEN) val = val.slice(0, MAX_VAL_LEN);
-          data[key] = val;
-        }
+        if (colonIdx > 0) data[inner.slice(0, colonIdx).trim()] = inner.slice(colonIdx + 1).trim();
       } else if (line.trim() !== '') {
         inData = false;
       }
     }
 
-    if (ts && eventType) {
-      rawEvents.push({ ts, eventType, actorLabel: actorLabel(actor), data });
-    }
+    if (ts && eventType) rawEvents.push({ ts, eventType, actorLabel: actorLabel(actor), data });
   }
 
   return buildDataset(rawEvents, tenant, baseUrl);
@@ -124,7 +134,6 @@ export function parseAuditLog(text: string): Dataset {
 
 /** Turn normalized events into the dashboard's compact Dataset shape. */
 export function buildDataset(rawEvents: RawEvent[], tenant: string, baseUrl: string): Dataset {
-  // Build sorted type and user arrays
   const typeSet = new Set<string>();
   const userSet = new Set<string>();
   for (const e of rawEvents) {
@@ -137,37 +146,31 @@ export function buildDataset(rawEvents: RawEvent[], tenant: string, baseUrl: str
   const typeIdx = new Map(types.map((t, i) => [t, i]));
   const userIdx = new Map(users.map((u, i) => [u, i]));
 
-  // Build category list and typeCat mapping
   const catSet = new Set<string>();
   for (const t of types) catSet.add(categoryFor(t));
   const cats = Array.from(catSet).sort();
   const catIdx = new Map(cats.map((c, i) => [c, i]));
   const typeCat = types.map((t) => catIdx.get(categoryFor(t))!);
 
-  // Build named array
   const named = users.map((u) => (isNamed(u) ? 1 : 0));
 
-  // Build events array: trim timestamp to second precision, drop Z
-  const events: [string, number, number, Record<string, string>][] = rawEvents.map((e) => {
-    // ISO 8601: "2026-05-01T00:38:29.637426Z" -> "2026-05-01T00:38:29"
+  // Trim timestamps to second precision, drop Z: "2026-05-01T00:38:29.637426Z" -> "2026-05-01T00:38:29"
+  const events: Dataset['events'] = rawEvents.map((e) => {
     const tsTrimmed = e.ts.replace(/\.\d+Z?$/, '').replace(/Z$/, '');
-    return [tsTrimmed, typeIdx.get(e.eventType)!, userIdx.get(e.actorLabel)!, e.data];
+    const tuple: Dataset['events'][number] = [tsTrimmed, typeIdx.get(e.eventType)!, userIdx.get(e.actorLabel)!, e.data];
+    if (e.extra && Object.keys(e.extra).length) tuple.push(e.extra);
+    return tuple;
   });
 
-  // Derive date range from events
   let dateMin = '';
   let dateMax = '';
+  const daySet = new Set<string>();
   for (const [ts] of events) {
     const day = ts.slice(0, 10);
+    daySet.add(day);
     if (!dateMin || day < dateMin) dateMin = day;
     if (!dateMax || day > dateMax) dateMax = day;
   }
-
-  // Count distinct days
-  const daySet = new Set<string>();
-  for (const [ts] of events) daySet.add(ts.slice(0, 10));
-
-  const namedActors = users.filter((u) => isNamed(u)).length;
 
   return {
     meta: {
@@ -177,7 +180,7 @@ export function buildDataset(rawEvents: RawEvent[], tenant: string, baseUrl: str
       dateMax,
       total: events.length,
       eventTypes: types.length,
-      namedActors,
+      namedActors: users.filter(isNamed).length,
       days: daySet.size,
     },
     cats,

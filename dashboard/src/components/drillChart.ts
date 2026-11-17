@@ -1,18 +1,7 @@
-import {
-  Chart,
-  DoughnutController,
-  BarController,
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-import { rows, getDrillLevel, setFilter, countBy, getFilter } from '../state.js';
-import { CAT_COLORS, truncate } from './chartUtils.js';
-
-Chart.register(DoughnutController, BarController, ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
+import type { Chart } from 'chart.js';
+import { rows, getDrillLevel, setFilter, countBy, getFilter, getDataset } from '../state.js';
+import { actorShort } from '../format.js';
+import { CAT_COLORS, COLORS, axisStyle, describeChart, restTooltip, summarize, topWithRest, truncate, upsertChart, type Bucket } from './chartUtils.js';
 
 let _chart: Chart | null = null;
 let _cb: () => void = () => {};
@@ -29,132 +18,99 @@ export function renderDrillChart(): void {
 
   const level = getDrillLevel();
   const f = getFilter();
+  const scoped = rows();
+  const ds = getDataset();
+  const catOfType = new Map<string, string>();
+  if (ds) ds.types.forEach((t, i) => catOfType.set(t, ds.cats[ds.typeCat[i]]));
 
-  let title = '';
-  let hint = '';
-  let labels: string[] = [];
-  let values: number[] = [];
-  let colors: string[] = [];
-  let chartType: 'doughnut' | 'bar' = 'doughnut';
-
-  const scopedRows = rows();
+  let title: string;
+  let hint: string;
+  let buckets: Bucket[];
+  let colors: string[];
+  const doughnut = level === 'category';
 
   if (level === 'category') {
     title = 'Events by Category';
-    hint = 'Click a slice to drill into a category.';
-    chartType = 'doughnut';
-    const counts = countBy(scopedRows, (e) => e.cat);
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    labels = entries.map(([k]) => k);
-    values = entries.map(([, v]) => v);
-    colors = labels.map((l) => CAT_COLORS[l] ?? '#a99fc0');
+    hint = 'Click a slice or legend entry to drill into a category.';
+    buckets = topWithRest(countBy(scoped, (e) => e.cat), 8);
+    colors = buckets.map((b) => (b.key ? CAT_COLORS[b.key] ?? COLORS.muted : COLORS.rest));
   } else if (level === 'eventType') {
     title = `Event Types in "${f.cat}"`;
     hint = 'Click a bar to drill into an event type.';
-    chartType = 'bar';
-    const counts = countBy(scopedRows, (e) => e.type);
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 14);
-    labels = entries.map(([k]) => k);
-    values = entries.map(([, v]) => v);
-    colors = labels.map(() => CAT_COLORS[f.cat ?? ''] ?? '#a99fc0');
+    buckets = topWithRest(countBy(scoped, (e) => e.type), 14);
+    colors = buckets.map((b) => (b.key ? CAT_COLORS[f.cat ?? ''] ?? COLORS.muted : COLORS.rest));
   } else if (level === 'actor') {
     title = `Actors for "${f.type}"`;
     hint = 'Click a bar to filter by actor.';
-    chartType = 'bar';
-    const counts = countBy(scopedRows, (e) => e.user);
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 14);
-    labels = entries.map(([k]) => k);
-    values = entries.map(([, v]) => v);
-    colors = labels.map(() => CAT_COLORS[f.cat ?? ''] ?? '#a99fc0');
+    buckets = topWithRest(countBy(scoped, (e) => e.user), 14, (k) => actorShort(k, 30));
+    colors = buckets.map((b) => (b.key ? CAT_COLORS[f.cat ?? ''] ?? COLORS.muted : COLORS.rest));
   } else {
-    // leaf: actor's event-type mix
-    title = `${f.user}'s Event Types`;
+    title = `Event Types for ${actorShort(f.user ?? '', 40)}`;
     hint = 'Click a bar to switch event type.';
-    chartType = 'bar';
-    const counts = countBy(scopedRows, (e) => e.type);
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 14);
-    labels = entries.map(([k]) => k);
-    values = entries.map(([, v]) => v);
-    colors = labels.map((l) => {
-      // color by category of that event type
-      for (const e of scopedRows) {
-        if (e.type === l) return CAT_COLORS[e.cat] ?? '#a99fc0';
-      }
-      return '#a99fc0';
-    });
+    buckets = topWithRest(countBy(scoped, (e) => e.type), 14);
+    colors = buckets.map((b) => (b.key ? CAT_COLORS[catOfType.get(b.key) ?? ''] ?? COLORS.muted : COLORS.rest));
   }
+  if (buckets.some((b) => !b.key)) hint += ' "Other" groups the smaller entries.';
 
   if (titleEl) titleEl.textContent = title;
   if (hintEl) hintEl.textContent = hint;
 
-  if (_chart) {
-    _chart.destroy();
-    _chart = null;
-  }
+  const select = (b: Bucket | undefined) => {
+    if (!b?.key) return; // "Other" isn't a single value
+    if (level === 'category') setFilter({ cat: b.key, type: null, user: null, day: null });
+    else if (level === 'eventType') setFilter({ type: b.key, day: null });
+    else if (level === 'actor') setFilter({ user: b.key, day: null });
+    else setFilter({ type: b.key, cat: catOfType.get(b.key) ?? f.cat });
+    _cb();
+  };
 
-  const ctx = canvas.getContext('2d')!;
+  const tooltip = {
+    callbacks: {
+      title: (items: { dataIndex: number }[]) => buckets[items[0].dataIndex]?.key ?? buckets[items[0].dataIndex]?.label ?? '',
+      label: (ctx: { raw: unknown }) => ` ${(ctx.raw as number).toLocaleString()} events`,
+      afterBody: (items: { dataIndex: number }[]) => restTooltip(buckets[items[0].dataIndex]),
+    },
+  };
 
-  const truncatedLabels = labels.map((l) => truncate(l, 30));
-
-  if (chartType === 'doughnut') {
-    _chart = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: truncatedLabels,
-        datasets: [{ data: values, backgroundColor: colors, borderColor: '#140921', borderWidth: 2 }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'right', labels: { color: '#FCF9FE', font: { size: 12 } } },
-          tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${(ctx.raw as number).toLocaleString()}` } },
+  _chart = upsertChart(_chart, canvas, doughnut
+    ? {
+        type: 'doughnut',
+        data: {
+          labels: buckets.map((b) => truncate(b.label, 30)),
+          datasets: [{ data: buckets.map((b) => b.value), backgroundColor: colors, borderColor: '#140921', borderWidth: 2 }],
         },
-        onClick: (_evt, elements) => {
-          if (!elements.length) return;
-          const idx = elements[0].index;
-          setFilter({ cat: labels[idx], type: null, user: null, day: null });
-          _cb();
-        },
-      },
-    });
-  } else {
-    _chart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: truncatedLabels,
-        datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }],
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              title: (items) => labels[items[0].dataIndex] ?? '',
-              label: (ctx) => ` ${(ctx.raw as number).toLocaleString()} events`,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: { color: COLORS.text, font: { size: 12 } },
+              // Legend clicks filter like slice clicks (Chart.js would hide the slice instead).
+              onClick: (_e, item) => select(buckets[item.index ?? -1]),
             },
+            tooltip,
           },
+          onClick: (_evt, elements) => elements.length && select(buckets[elements[0].index]),
         },
-        scales: {
-          x: { ticks: { color: '#a99fc0' }, grid: { color: '#3a2a52' } },
-          y: { ticks: { color: '#FCF9FE', font: { size: 11 } } },
+      }
+    : {
+        type: 'bar',
+        data: {
+          labels: buckets.map((b) => truncate(b.label, 30)),
+          datasets: [{ data: buckets.map((b) => b.value), backgroundColor: colors, borderRadius: 4 }],
         },
-        onClick: (_evt, elements) => {
-          if (!elements.length) return;
-          const idx = elements[0].index;
-          if (level === 'eventType') {
-            setFilter({ type: labels[idx], day: null });
-          } else if (level === 'actor') {
-            setFilter({ user: labels[idx], day: null });
-          } else if (level === 'leaf') {
-            setFilter({ type: labels[idx] });
-          }
-          _cb();
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: false }, tooltip },
+          scales: axisStyle,
+          onClick: (_evt, elements) => elements.length && select(buckets[elements[0].index]),
         },
-      },
-    });
-  }
+      });
+
+  describeChart(canvas, `${title}: ${summarize(buckets)}`, scoped.length === 0);
 }

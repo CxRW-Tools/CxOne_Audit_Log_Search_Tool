@@ -100,18 +100,27 @@ python main.py --start-date 2026-03-01 --end-date 2026-03-02 --csv --raw --print
 python main.py --serve
 ```
 
-This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range, optionally a search string, and click **Run query**. While it runs, the page shows the current step (fetching, resolving names, preparing results) with a progress bar and counts, plus any rate-limit waits or retries. You can run as many queries as you like; press **Ctrl+C** in the terminal to stop.
+This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range (or a preset: Today, 7, 30, 90 days) and click **Run query**. While it runs, the page shows the current step (fetching, resolving names, preparing results) with a progress bar and counts, plus any rate-limit waits or retries; **Cancel** stops it. You can run as many queries as you like; press **Ctrl+C** in the terminal to stop the server.
 
-The dashboard shows:
+Query options:
 
-- **KPI strip** — total events, scans created, projects created, logins (success/fail), source-code downloads. Click a card to filter to it.
-- **Drill-down chart** — category → event type → actor; breadcrumb chips step back a level
-- **Top Actors** — named identities ranked by event count; click to filter
-- **Activity Timeline** — daily volume; click a bar to filter by day
-- **Hourly Distribution** — events by UTC hour
-- **Event Log** — sortable, paginated table with expandable rows and free-text search
+- **Server filter** — only fetch events containing this text (case-insensitive; the CLI's `--search-string` stays case-sensitive).
+- **Resolve names** — same as `--human-readable` (on by default). Name lookups are cached for the life of the server, so later queries are faster.
+- **Compare with previous period** — also fetches the equally long period before, so KPIs show the change and the timeline overlays the previous period.
 
-Only credentials are required (from `.env` or the CLI flags); dates are chosen in the browser. Queries run the same pipeline as the CLI, so `--search-string` and `--human-readable` behave identically (the **Resolve names** checkbox, on by default). Name lookups are cached for the life of the server, so later queries are faster.
+Only credentials are required (from `.env` or the CLI flags); dates are chosen in the browser. The last query is remembered, and the URL holds the query and filters, so a view can be bookmarked (data is never put in the URL).
+
+### What the dashboard shows
+
+- **Source banner** — what's loaded (live query, file or URL), the range, whether names are resolved, and the time zone.
+- **KPI strip** — total events, scans created, projects created, logins, failed logins, source-code downloads. Click a card to filter to exactly the events it counts; with comparison on, each card shows the change vs the previous period.
+- **Highlights** — patterns worth a look, ranked by severity: a login that succeeds right after a burst of failures, bursts of failed logins for one account, failed logins from one IP across several accounts (password spraying), logins from a new or many IPs, admin-level role changes, API key / OAuth client / webhook changes, MFA / identity-provider / tenant setting changes, deletions, heavy downloads or exports, and changes outside working hours. Click one to see its events.
+- **Drill-down chart** — category → event type → actor; smaller entries are grouped as "Other (+N)" so totals add up.
+- **Top Actors** — actors by event count, including unresolved IDs (shown grey); two people with the same display name stay separate.
+- **Activity Timeline** and **Hourly Distribution** — click a bar to filter by day or hour.
+- **Event Log** — timestamp, type, category, actor (name and username), IP and key detail. Expand a row to see every field, filter to or exclude any value, or copy the event as JSON. **Export CSV / JSON** downloads all filtered events (the JSON loads back into the dashboard).
+
+Filtering: click charts and cards, use **Add filter** (any field, including IP, project, status, action, resource and payload keys; "Only" or "Exclude"), or the search box (case-insensitive across all fields, including usernames and IPs). Switch between **UTC** and **Local** time; hide the charts to work in the table.
 
 | Flag | Meaning |
 |------|---------|
@@ -124,7 +133,9 @@ Only credentials are required (from `.env` or the CLI flags); dates are chosen i
 
 ## Standalone dashboard
 
-[`web/CxOne_Audit_Log_Dashboard.html`](web/CxOne_Audit_Log_Dashboard.html) is a single self-contained file. Open it in a browser (or send it to someone) and drag in, or **Load file**, any CLI export. Everything runs in the browser; no data leaves the machine.
+[`web/CxOne_Audit_Log_Dashboard.html`](web/CxOne_Audit_Log_Dashboard.html) is a single self-contained file. Open it in a browser (or send it to someone) and drag in, or **Load file**, any CLI export. Everything runs in the browser; no data leaves the machine. Everything above works the same, except live queries; **Compare periods** splits the loaded range into two equal halves.
+
+CSV and `--raw` JSON exports include the event ID, IP address, action type and resource; the formatted console output (`.log`) doesn't, so those columns and IP-based highlights are only available with CSV or JSON.
 
 Use `--human-readable` so actors show as names instead of UUIDs:
 

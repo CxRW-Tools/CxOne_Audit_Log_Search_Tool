@@ -1,19 +1,54 @@
-import type { Dataset, DecodedEvent } from './types.js';
+import type { Dataset, DecodedEvent, TimeZoneMode } from './types.js';
 import { parseAuditLog } from './parser.js';
 import { looksLikeRawExport, parseCsvExport, parseRawExport } from './apiExport.js';
 
-export function decodeDataset(ds: Dataset): DecodedEvent[] {
-  return ds.events.map(([ts, typeIdx, userIdx, data]) => ({
-    ts,
-    typeIdx,
-    userIdx,
-    data,
-    type: ds.types[typeIdx],
-    cat: ds.cats[ds.typeCat[typeIdx]],
-    user: ds.users[userIdx],
-    day: ts.slice(0, 10),
-    hour: parseInt(ts.slice(11, 13), 10),
-  }));
+export function decodeDataset(ds: Dataset, tz: TimeZoneMode = 'utc'): DecodedEvent[] {
+  const events = ds.events.map(([ts, typeIdx, userIdx, data, extra], idx): DecodedEvent => {
+    const type = ds.types[typeIdx];
+    const cat = ds.cats[ds.typeCat[typeIdx]];
+    const user = ds.users[userIdx];
+    const e: DecodedEvent = {
+      idx,
+      ts,
+      epoch: Date.parse(ts + 'Z'),
+      typeIdx,
+      userIdx,
+      data: data ?? {},
+      type,
+      cat,
+      user,
+      id: extra?.id,
+      ip: extra?.ip,
+      action: extra?.action,
+      resource: extra?.resource,
+      day: '',
+      hour: 0,
+      weekday: 0,
+      // Built once here so free-text search never re-serializes events per keystroke.
+      search: [type, cat, user, extra?.ip ?? '', extra?.id ?? '', JSON.stringify(data ?? {})].join('\u0001').toLowerCase(),
+    };
+    return e;
+  });
+  applyTimeZone(events, tz);
+  return events;
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** (Re)compute day / hour / weekday in the display time zone. */
+export function applyTimeZone(events: DecodedEvent[], tz: TimeZoneMode): void {
+  for (const e of events) {
+    if (tz === 'utc' || Number.isNaN(e.epoch)) {
+      e.day = e.ts.slice(0, 10);
+      e.hour = parseInt(e.ts.slice(11, 13), 10) || 0;
+      e.weekday = Number.isNaN(e.epoch) ? 0 : new Date(e.epoch).getUTCDay();
+    } else {
+      const d = new Date(e.epoch);
+      e.day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      e.hour = d.getHours();
+      e.weekday = d.getDay();
+    }
+  }
 }
 
 export async function loadFromUrl(url: string): Promise<{ dataset: Dataset; events: DecodedEvent[] }> {

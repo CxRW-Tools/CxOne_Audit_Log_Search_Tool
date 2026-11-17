@@ -78,7 +78,7 @@ export async function runQuery(
 /** Snapshot of the server-side query (see QueryProgress in src/pipeline.py). */
 export interface QueryProgress {
   running: boolean;
-  stage: 'idle' | 'auth' | 'fetch' | 'filter' | 'resolve' | 'send' | 'done' | 'error';
+  stage: 'idle' | 'auth' | 'fetch' | 'filter' | 'resolve' | 'send' | 'done' | 'error' | 'cancelled';
   humanReadable?: boolean;
   elapsedSeconds?: number;
   fetched?: number;
@@ -156,11 +156,44 @@ export function describeProgress(p: QueryProgress | null, humanReadable: boolean
   }
 }
 
-/** Default range: the last 7 days, clamped to the 365-day retention window. */
-export function defaultRange(cfg: ServeConfig): { start: string; end: string } {
+/** Add days to a YYYY-MM-DD date. */
+export function shiftDay(day: string, delta: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+export function daysInclusive(start: string, end: string): number {
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1;
+}
+
+/** Range ending today covering `days` days, clamped to the 365-day retention window. */
+export function presetRange(cfg: ServeConfig, days: number): { start: string; end: string } {
   const end = cfg.today;
-  const d = new Date(`${end}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 6);
-  const start = d.toISOString().slice(0, 10);
+  const start = shiftDay(end, -(days - 1));
   return { start: start < cfg.earliest ? cfg.earliest : start, end };
+}
+
+/** Default range: the last 7 days. */
+export function defaultRange(cfg: ServeConfig): { start: string; end: string } {
+  return presetRange(cfg, 7);
+}
+
+/**
+ * The range actually fetched: with comparison on, the equally long period before `start` is
+ * fetched too (clamped to retention). Returns the fetch start and the split between periods.
+ */
+export function fetchRange(cfg: ServeConfig, start: string, end: string, compare: boolean): { fetchStart: string; split: string | null } {
+  if (!compare) return { fetchStart: start, split: null };
+  const prevStart = shiftDay(start, -daysInclusive(start, end));
+  return { fetchStart: prevStart < cfg.earliest ? cfg.earliest : prevStart, split: start };
+}
+
+/** Ask the server to stop the running query (it stops at the next page or name lookup). */
+export async function cancelQuery(cfg: ServeConfig): Promise<void> {
+  try {
+    await fetch('/api/cancel', { method: 'POST', headers: { 'X-CxOne-Token': cfg.token } });
+  } catch {
+    /* server gone; nothing to cancel */
+  }
 }

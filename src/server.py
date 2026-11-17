@@ -25,7 +25,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from src.pipeline import QueryProgress, parse_date_range, run_query
+from src.pipeline import QueryCancelled, QueryProgress, parse_date_range, run_query
 
 DASHBOARD_FILENAME = "CxOne_Audit_Log_Dashboard.html"
 DEFAULT_DASHBOARD_PATH = os.path.join(
@@ -111,6 +111,19 @@ def _make_handler(state: _State):
                 return self._send(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return self._error(HTTPStatus.NOT_FOUND, "Not found.")
 
+        def do_POST(self):
+            if self.headers.get("Host") not in state.allowed_hosts:
+                return self._error(HTTPStatus.FORBIDDEN, "Unexpected Host header.")
+            if urlparse(self.path).path == "/api/cancel":
+                if self._authorized():
+                    running = state.progress.snapshot().get("running")
+                    if running:
+                        state.progress.cancel()
+                        print("  cancel requested", flush=True)
+                    self._json(HTTPStatus.OK, {"cancelled": bool(running)})
+                return None
+            return self._error(HTTPStatus.NOT_FOUND, "Not found.")
+
         def _dashboard(self):
             try:
                 with open(state.html_path, "r", encoding="utf-8") as f:
@@ -171,9 +184,15 @@ def _make_handler(state: _State):
                     flush=True,
                 )
                 try:
+                    # Case-insensitive, to match the dashboard's own search box.
                     events = run_query(
-                        state.ctx, start_date, end_date, search, human_readable, progress=progress
+                        state.ctx, start_date, end_date, search, human_readable,
+                        progress=progress, ignore_case=True,
                     )
+                except QueryCancelled:
+                    print("  cancelled", flush=True)
+                    progress.finish(cancelled=True)
+                    return self._error(HTTPStatus.CONFLICT, "Query cancelled.")
                 except Exception as e:  # report to the page; keep serving
                     print(f"  failed: {e}", flush=True)
                     progress.finish(error=e)

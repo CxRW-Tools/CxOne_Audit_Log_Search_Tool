@@ -8,20 +8,27 @@
 </head>
 <body>
   <div id="app">
-    <!-- Query bar (only shown when served by `python main.py --serve`; see src/serve.ts) -->
-    <form id="query-bar" class="query-bar" hidden autocomplete="off">
+    <!-- Query bar (only shown when served by `python main.py --serve`; see src/serve.ts).
+         In that mode it is the sticky header and also hosts the header actions. -->
+    <form id="query-bar" class="query-bar" hidden autocomplete="off" aria-label="Query CxOne">
       <div class="query-heading">
         <span class="query-eyebrow">Query CxOne</span>
         <span id="query-tenant" class="query-tenant"></span>
       </div>
+      <div id="q-presets" class="query-presets" role="group" aria-label="Date presets"></div>
       <label class="query-field">From <input type="date" id="q-start" required /></label>
       <label class="query-field">To <input type="date" id="q-end" required /></label>
-      <input type="text" id="q-search" class="query-search" placeholder="Search string (optional)" />
+      <input type="text" id="q-search" class="query-search" placeholder="Server filter (optional)" aria-label="Server-side filter: only fetch events containing this text (case-insensitive)" title="Only fetch events containing this text anywhere (case-insensitive)" />
       <label class="query-check" title="Resolve user, group and role IDs to names (slower)">
         <input type="checkbox" id="q-human" checked /> Resolve names
       </label>
+      <label class="query-check" title="Also fetch the equally long period before, and show changes against it">
+        <input type="checkbox" id="q-compare" /> Compare with previous period
+      </label>
       <button type="submit" id="q-run" class="query-run">Run query</button>
+      <button type="button" id="q-cancel" class="query-cancel" hidden>Cancel</button>
       <span id="q-status" class="query-status" role="status" aria-live="polite"></span>
+      <div id="query-actions-slot" class="query-actions-slot"></div>
     </form>
 
     <!-- Loading state -->
@@ -56,17 +63,20 @@
     <!-- Main dashboard (hidden until data loads) -->
     <div id="dashboard" style="display:none">
 
-      <!-- Header -->
-      <header class="app-header">
+      <!-- Header (replaced by the query bar in --serve mode) -->
+      <header class="app-header" id="app-header">
         <div class="header-logo">
-          <!-- TODO: replace with real asset once public/logo.svg is available -->
           <img src="./logo.svg" alt="Checkmarx" onerror="this.style.display='none'" />
         </div>
         <div class="header-titles">
           <div class="header-eyebrow">Security Platform</div>
           <h1 class="header-title">Audit Log Dashboard</h1>
         </div>
-        <div class="header-actions">
+        <div class="header-actions" id="header-actions">
+          <div class="seg" role="group" aria-label="Time zone">
+            <button type="button" class="seg-btn" data-tz="utc" aria-pressed="true">UTC</button>
+            <button type="button" class="seg-btn" data-tz="local" aria-pressed="false">Local</button>
+          </div>
           <label class="file-drop-zone" id="file-drop-zone">
             📂 Load file (.csv / .json / .log)
             <input type="file" id="file-input" accept=".csv,.json,.log,.txt" />
@@ -75,64 +85,89 @@
       </header>
 
       <!-- Filter bar -->
-      <div class="filter-bar">
-        <div id="breadcrumb-path"></div>
+      <div class="filter-bar" id="filter-bar">
+        <div id="breadcrumb-path" aria-label="Active filters"></div>
+        <form id="facet-form" class="facet-form" hidden aria-label="Add a field filter">
+          <select id="facet-field" aria-label="Field to filter on"></select>
+          <input id="facet-value" list="facet-values" placeholder="value…" aria-label="Value" autocomplete="off" />
+          <datalist id="facet-values"></datalist>
+          <span class="facet-mode" role="radiogroup" aria-label="Filter mode">
+            <label><input type="radio" name="facet-mode" value="include" checked /> Only</label>
+            <label><input type="radio" name="facet-mode" value="exclude" /> Exclude</label>
+          </span>
+          <button type="submit" class="small-btn">Add filter</button>
+        </form>
         <div class="search-wrap">
-          <input type="text" id="search-input" placeholder="Search events…" autocomplete="off" />
-          <button id="reset-btn">✕ Reset all</button>
+          <input type="search" id="search-input" placeholder="Search events…" autocomplete="off" aria-label="Search loaded events (case-insensitive)" />
+          <button type="button" id="reset-btn">✕ Reset all</button>
         </div>
       </div>
 
-      <!-- Scope summary -->
-      <div class="scope-summary" id="scope-summary"></div>
+      <!-- Source + scope -->
+      <div class="scope-row">
+        <div class="source-banner" id="source-banner"></div>
+        <div class="scope-summary" id="scope-summary"></div>
+        <div class="scope-actions">
+          <label class="query-check" id="compare-toggle-label" title="Split the loaded data into the current period and the equally long period before it">
+            <input type="checkbox" id="compare-toggle" /> <span id="compare-toggle-text">Compare periods</span>
+          </label>
+          <a href="#events" class="small-link" id="jump-events">Jump to events ↓</a>
+          <button type="button" class="small-btn" id="charts-toggle" aria-controls="charts" aria-expanded="true">Hide charts</button>
+        </div>
+      </div>
 
       <!-- Main content -->
       <main class="main-content">
 
         <!-- KPI strip -->
-        <div id="kpis"></div>
+        <div id="kpis" role="group" aria-label="Key metrics"></div>
 
-        <!-- Top chart row: drill + actors -->
-        <div class="chart-grid-top">
-          <div class="panel">
-            <div class="panel-title" id="drill-title">Events by Category</div>
-            <div class="panel-hint" id="drill-hint">Click a slice to drill into a category.</div>
-            <div class="chart-container-tall">
-              <canvas id="drill-canvas"></canvas>
-            </div>
-          </div>
-          <div class="panel">
-            <div class="panel-title">Top Actors</div>
-            <div class="panel-hint">Named identities by event count. Click to filter.</div>
-            <div class="chart-container-tall">
-              <canvas id="actor-canvas"></canvas>
-            </div>
-          </div>
-        </div>
+        <!-- Highlights -->
+        <section class="panel highlights" id="highlights" aria-label="Highlights"></section>
 
-        <!-- Bottom chart row: timeline + hourly -->
-        <div class="chart-grid-bottom">
-          <div class="panel">
-            <div class="panel-title">Activity Timeline</div>
-            <div class="panel-hint">Daily event volume. Click a bar to filter by day.</div>
-            <div class="chart-container">
-              <canvas id="trend-canvas"></canvas>
+        <div id="charts">
+          <!-- Top chart row: drill + actors -->
+          <div class="chart-grid-top">
+            <div class="panel">
+              <div class="panel-title" id="drill-title">Events by Category</div>
+              <div class="panel-hint" id="drill-hint">Click a slice to drill into a category.</div>
+              <div class="chart-container-tall">
+                <canvas id="drill-canvas"></canvas>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">Top Actors</div>
+              <div class="panel-hint" id="actor-hint">Actors by event count. Click to filter.</div>
+              <div class="chart-container-tall">
+                <canvas id="actor-canvas"></canvas>
+              </div>
             </div>
           </div>
-          <div class="panel">
-            <div class="panel-title">Hourly Distribution (UTC)</div>
-            <div class="panel-hint">Events by hour of day.</div>
-            <div class="chart-container">
-              <canvas id="hour-canvas"></canvas>
+
+          <!-- Bottom chart row: timeline + hourly -->
+          <div class="chart-grid-bottom">
+            <div class="panel">
+              <div class="panel-title">Activity Timeline</div>
+              <div class="panel-hint" id="trend-hint">Daily event volume. Click a bar to filter by day.</div>
+              <div class="chart-container">
+                <canvas id="trend-canvas"></canvas>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-title" id="hour-title">Hourly Distribution (UTC)</div>
+              <div class="panel-hint">Events by hour of day. Click a bar to filter by hour.</div>
+              <div class="chart-container">
+                <canvas id="hour-canvas"></canvas>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Event log -->
-        <div class="panel">
+        <section class="panel" id="events" aria-label="Event log">
           <div class="panel-title">Event Log</div>
           <div id="event-log"></div>
-        </div>
+        </section>
 
       </main>
 

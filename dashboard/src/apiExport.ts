@@ -2,17 +2,12 @@
 //   --raw  → JSON array of audit events on stdout (usually redirected to a file,
 //            so it is wrapped in the tool's banner and "Done in …" footer)
 //   --csv  → UTF-8 CSV with eventDate, eventType, actionUserId and a JSON `data` column
-import type { Dataset } from './types.js';
-import { actorLabel, buildDataset, MAX_VAL_LEN, type RawEvent } from './parser.js';
+import type { Dataset, EventData, EventExtra } from './types.js';
+import { actorLabel, buildDataset, type RawEvent } from './parser.js';
 
 type ApiEvent = Record<string, unknown>;
 
-function flatten(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  if (Array.isArray(v)) return v.map((x) => (x !== null && typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ');
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
-}
+const str = (v: unknown) => (v === null || v === undefined || v === '' ? undefined : String(v));
 
 function toRawEvents(items: ApiEvent[]): RawEvent[] {
   const out: RawEvent[] = [];
@@ -21,14 +16,19 @@ function toRawEvents(items: ApiEvent[]): RawEvent[] {
     const ts = String(it.eventDate ?? '').trim();
     const eventType = String(it.eventType ?? '').trim();
     if (!ts || !eventType) continue;
-    const data: Record<string, string> = {};
+    // Keep data values exactly as returned (arrays, objects, numbers); they're formatted at display time.
     const d = it.data;
-    if (d && typeof d === 'object' && !Array.isArray(d)) {
-      for (const [k, v] of Object.entries(d as Record<string, unknown>)) {
-        data[k] = flatten(v).slice(0, MAX_VAL_LEN);
-      }
-    }
-    out.push({ ts, eventType, actorLabel: actorLabel(String(it.actionUserId ?? '')), data });
+    const data: EventData = d && typeof d === 'object' && !Array.isArray(d) ? { ...(d as EventData) } : {};
+    const extra: EventExtra = {};
+    const id = str(it.eventID ?? it.eventId ?? it.id);
+    const ip = str(it.ipAddress ?? it.ip);
+    const action = str(it.actionType);
+    const resource = str(it.auditResource);
+    if (id) extra.id = id;
+    if (ip) extra.ip = ip;
+    if (action) extra.action = action;
+    if (resource) extra.resource = resource;
+    out.push({ ts, eventType, actorLabel: actorLabel(String(it.actionUserId ?? '')), data, extra });
   }
   return out;
 }

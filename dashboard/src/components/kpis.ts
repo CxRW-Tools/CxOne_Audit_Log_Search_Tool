@@ -1,93 +1,114 @@
 import type { DecodedEvent } from '../types.js';
-import { getFilter, setFilter, resetFilter } from '../state.js';
+import { getFilter, setFilter, resetFilter, periodEvents, previousPeriodEvents, getCompareSplit, getField, type Facet, type FilterState } from '../state.js';
+import { categoryFor } from '../parser.js';
+import { esc } from '../format.js';
 
 type Callback = () => void;
 let _cb: Callback = () => {};
+let _wired = false;
+
+/**
+ * Each card is an exact predicate. The same definition drives the count and the filter the
+ * card applies, so the number on the card always matches the events it shows.
+ */
+interface KpiDef {
+  key: string;
+  label: string;
+  cls: string;
+  type?: string;
+  facet?: Facet;
+  /** Rising is bad (failures, downloads): colours the delta. */
+  upIsBad?: boolean;
+  alertCls?: string;
+  sub?: (events: DecodedEvent[]) => string;
+}
+
+const KPIS: KpiDef[] = [
+  { key: 'total', label: 'Total Events', cls: 'kpi-total' },
+  { key: 'scans', label: 'Scans Created', cls: 'kpi-scans', type: 'scans.create' },
+  { key: 'projects', label: 'Projects Created', cls: 'kpi-projects', type: 'projects.create' },
+  {
+    key: 'logins',
+    label: 'Logins',
+    cls: 'kpi-logins',
+    type: 'users.login',
+    sub: (evs) => `${evs.filter((e) => e.data.status === 'OK').length.toLocaleString()} successful`,
+  },
+  {
+    key: 'failed-logins',
+    label: 'Failed Logins',
+    cls: 'kpi-logins',
+    type: 'users.login',
+    facet: { field: 'data.status', value: 'FAIL', exclude: false },
+    upIsBad: true,
+    alertCls: 'kpi-warn',
+  },
+  { key: 'downloads', label: 'Source-Code Downloads', cls: 'kpi-downloads', type: 'source-code.download', upIsBad: true, alertCls: 'kpi-alert' },
+];
+
+function predicate(def: KpiDef): (e: DecodedEvent) => boolean {
+  return (e) => (!def.type || e.type === def.type) && (!def.facet || getField(e, def.facet.field) === def.facet.value);
+}
+
+function isActive(def: KpiDef, f: FilterState): boolean {
+  const facetMatch = def.facet
+    ? f.facets.length === 1 && f.facets[0].field === def.facet.field && f.facets[0].value === def.facet.value && !f.facets[0].exclude
+    : f.facets.length === 0;
+  const noExtra = !f.user && !f.day && f.hour === null && !f.q && !f.highlight;
+  if (!def.type) return !f.cat && !f.type && facetMatch && noExtra;
+  return f.type === def.type && facetMatch && noExtra;
+}
+
+function delta(current: number, previous: number, upIsBad: boolean): string {
+  if (!previous && !current) return `<div class="kpi-delta">no change vs previous</div>`;
+  if (!previous) return `<div class="kpi-delta ${upIsBad ? 'delta-bad' : 'delta-up'}">new vs previous (0)</div>`;
+  const change = ((current - previous) / previous) * 100;
+  const rounded = Math.round(change);
+  const dir = rounded > 0 ? 'up' : rounded < 0 ? 'down' : 'flat';
+  const cls = dir === 'flat' ? '' : (dir === 'up') === upIsBad ? 'delta-bad' : 'delta-good';
+  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '■';
+  return `<div class="kpi-delta ${cls}" title="Previous period: ${previous.toLocaleString()}">${arrow} ${Math.abs(rounded)}% vs previous (${previous.toLocaleString()})</div>`;
+}
 
 export function initKpis(cb: Callback): void {
   _cb = cb;
-}
-
-export function renderKpis(allEvents: DecodedEvent[]): void {
   const el = document.getElementById('kpis');
-  if (!el) return;
-
-  const f = getFilter();
-
-  const total = allEvents.length;
-  const scansCreated = allEvents.filter((e) => e.type === 'scans.create').length;
-  const projectsCreated = allEvents.filter((e) => e.type === 'projects.create').length;
-  const logins = allEvents.filter((e) => e.type === 'users.login');
-  const loginsTotal = logins.length;
-  const loginsOk = logins.filter((e) => e.data.status === 'OK').length;
-  const loginsFail = logins.filter((e) => e.data.status === 'FAIL').length;
-  const downloads = allEvents.filter((e) => e.type === 'source-code.download').length;
-
-  // Determine which card (if any) is active
-  const activeScans = f.type === 'scans.create' && !f.q;
-  const activeProjects = f.type === 'projects.create' && !f.q;
-  const activeLogins = f.type === 'users.login' && !f.q;
-  const activeFailedLogins = f.type === 'users.login' && f.q === 'FAIL';
-  const activeDownloads = f.type === 'source-code.download' && !f.q;
-  const activeTotal = !f.cat && !f.type && !f.user && !f.day && !f.q;
-
-  el.innerHTML = `
-    <div class="kpi-card kpi-total${activeTotal ? ' kpi-active' : ''}" data-kpi="total" title="Show all events">
-      <div class="kpi-label">Total Events</div>
-      <div class="kpi-value">${total.toLocaleString()}</div>
-    </div>
-    <div class="kpi-card kpi-scans${activeScans ? ' kpi-active' : ''}" data-kpi="scans" title="Filter to scans.create">
-      <div class="kpi-label">Scans Created</div>
-      <div class="kpi-value">${scansCreated.toLocaleString()}</div>
-    </div>
-    <div class="kpi-card kpi-projects${activeProjects ? ' kpi-active' : ''}" data-kpi="projects" title="Filter to projects.create">
-      <div class="kpi-label">Projects Created</div>
-      <div class="kpi-value">${projectsCreated.toLocaleString()}</div>
-    </div>
-    <div class="kpi-card kpi-logins${activeLogins ? ' kpi-active' : ''}" data-kpi="logins" title="Filter to users.login">
-      <div class="kpi-label">Logins</div>
-      <div class="kpi-value">${loginsTotal.toLocaleString()}</div>
-      <div class="kpi-sub">${loginsOk.toLocaleString()} successful</div>
-    </div>
-    <div class="kpi-card ${loginsFail > 0 ? 'kpi-warn' : 'kpi-logins'}${activeFailedLogins ? ' kpi-active' : ''}" data-kpi="failed-logins" title="Filter to failed logins">
-      <div class="kpi-label">Failed Logins</div>
-      <div class="kpi-value">${loginsFail.toLocaleString()}</div>
-    </div>
-    <div class="kpi-card ${downloads > 0 ? 'kpi-alert' : 'kpi-downloads'}${activeDownloads ? ' kpi-active' : ''}" data-kpi="downloads" title="Filter to source-code.download">
-      <div class="kpi-label">Source-Code Downloads</div>
-      <div class="kpi-value">${downloads.toLocaleString()}</div>
-    </div>
-  `;
-
-  el.querySelectorAll('.kpi-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      const kpi = (card as HTMLElement).dataset.kpi!;
-      handleKpiClick(kpi);
-    });
+  if (!el || _wired) return;
+  _wired = true;
+  el.addEventListener('click', (ev) => {
+    const card = (ev.target as HTMLElement).closest<HTMLElement>('[data-kpi]');
+    if (!card) return;
+    const def = KPIS.find((k) => k.key === card.dataset.kpi)!;
+    const f = getFilter();
+    resetFilter();
+    if (!isActive(def, f) && def.type) {
+      setFilter({ cat: categoryFor(def.type), type: def.type, facets: def.facet ? [def.facet] : [] });
+    }
+    _cb();
   });
 }
 
-function handleKpiClick(kpi: string): void {
+export function renderKpis(): void {
+  const el = document.getElementById('kpis');
+  if (!el) return;
   const f = getFilter();
+  const current = periodEvents();
+  const comparing = getCompareSplit() !== null;
+  const previous = comparing ? previousPeriodEvents() : [];
 
-  if (kpi === 'total') {
-    resetFilter();
-  } else if (kpi === 'scans') {
-    if (f.type === 'scans.create' && !f.q) resetFilter();
-    else setFilter({ cat: 'Scanning', type: 'scans.create', user: null, day: null, q: '' });
-  } else if (kpi === 'projects') {
-    if (f.type === 'projects.create' && !f.q) resetFilter();
-    else setFilter({ cat: 'Project Mgmt', type: 'projects.create', user: null, day: null, q: '' });
-  } else if (kpi === 'logins') {
-    if (f.type === 'users.login' && !f.q) resetFilter();
-    else setFilter({ cat: 'Identity & Auth', type: 'users.login', user: null, day: null, q: '' });
-  } else if (kpi === 'failed-logins') {
-    if (f.type === 'users.login' && f.q === 'FAIL') resetFilter();
-    else setFilter({ cat: 'Identity & Auth', type: 'users.login', user: null, day: null, q: 'FAIL' });
-  } else if (kpi === 'downloads') {
-    if (f.type === 'source-code.download' && !f.q) resetFilter();
-    else setFilter({ cat: 'Data Access', type: 'source-code.download', user: null, day: null, q: '' });
-  }
-
-  _cb();
+  el.innerHTML = KPIS.map((def) => {
+    const pred = predicate(def);
+    const matched = current.filter(pred);
+    const n = matched.length;
+    const active = isActive(def, f);
+    const cls = [def.cls, def.alertCls && n > 0 ? def.alertCls : '', active ? 'kpi-active' : ''].filter(Boolean).join(' ');
+    const title = def.type ? `${active ? 'Clear filter' : 'Filter to'} ${def.type}${def.facet ? ` with ${def.facet.field.replace('data.', '')} = ${def.facet.value}` : ''}` : 'Show all events';
+    return `
+      <button type="button" class="kpi-card ${cls}" data-kpi="${def.key}" aria-pressed="${active}" title="${esc(title)}">
+        <span class="kpi-label">${esc(def.label)}</span>
+        <span class="kpi-value">${n.toLocaleString()}</span>
+        ${def.sub ? `<span class="kpi-sub">${esc(def.sub(matched))}</span>` : ''}
+        ${comparing ? delta(n, previous.filter(pred).length, !!def.upIsBad) : ''}
+      </button>`;
+  }).join('');
 }

@@ -66,6 +66,10 @@ class QueryContext:
         return self._resolver
 
 
+class QueryCancelled(Exception):
+    """Raised inside run_query when QueryProgress.cancel() was called."""
+
+
 class QueryProgress:
     """
     Thread-safe progress of the query in flight, read by the --serve /api/progress endpoint
@@ -81,19 +85,34 @@ class QueryProgress:
     def __init__(self):
         self._lock = threading.Lock()
         self._state = {"running": False, "stage": "idle"}
+        self._cancel = threading.Event()
 
     def start(self, **fields):
         with self._lock:
+            self._cancel.clear()
             self._state = {"running": True, "stage": "auth", "startedAt": time.time(), **fields}
 
     def update(self, **fields):
         with self._lock:
             self._state.update(fields)
 
-    def finish(self, error=None):
+    def cancel(self):
+        """Request cancellation; run_query stops at the next page or name lookup."""
+        self._cancel.set()
+
+    @property
+    def cancelled(self):
+        return self._cancel.is_set()
+
+    def check_cancelled(self):
+        if self._cancel.is_set():
+            raise QueryCancelled("Query cancelled.")
+
+    def finish(self, error=None, cancelled=False):
         with self._lock:
-            self._state.update(running=False, stage="error" if error else "done", notice=None)
-            if error:
+            stage = "cancelled" if cancelled else ("error" if error else "done")
+            self._state.update(running=False, stage=stage, notice=None)
+            if error and not cancelled:
                 self._state["error"] = str(error)
 
     def snapshot(self):
@@ -105,18 +124,28 @@ class QueryProgress:
 
 
 def run_query(
-    ctx, start_date, end_date, search_string=None, human_readable=False, stages=None, progress=None
+    ctx,
+    start_date,
+    end_date,
+    search_string=None,
+    human_readable=False,
+    stages=None,
+    progress=None,
+    ignore_case=False,
 ):
     """
     Fetch, filter, sort and optionally resolve audit events. Returns a list of event dicts
     in the API's shape (the same objects --raw prints).
 
     `stages` is an optional StageTracker for CLI progress output.
-    `progress` is an optional QueryProgress, updated as the query advances (used by --serve).
+    `progress` is an optional QueryProgress, updated as the query advances (used by --serve);
+    if its cancel() is called, QueryCancelled is raised at the next page or event.
+    `ignore_case` makes the search case-insensitive (the CLI default is case-sensitive).
     """
 
     def report(**fields):
         if progress:
+            progress.check_cancelled()
             progress.update(**fields)
 
     report(stage="auth")
@@ -141,7 +170,7 @@ def run_query(
         stages.end_stage("Stage 1: Fetch audit events", events_fetched=len(events))
 
     report(stage="filter", fetched=len(events))
-    events = sort_events(filter_events(events, search_string))
+    events = sort_events(filter_events(events, search_string, ignore_case=ignore_case))
     report(matched=len(events))
 
     if human_readable:

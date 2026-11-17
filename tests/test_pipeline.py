@@ -118,6 +118,45 @@ class RunQueryProgressTest(unittest.TestCase):
         self.assertIsNone(ctx.api.notice_callback)
 
 
+class FilterEventsTest(unittest.TestCase):
+    EVENTS = [{"eventType": "scans.create", "data": {"projectName": "José-Alpha"}}, {"eventType": "users.login", "data": {}}]
+
+    def test_cli_default_is_case_sensitive(self):
+        from src.utils.audit_output import filter_events
+        self.assertEqual(len(filter_events(self.EVENTS, "scans")), 1)
+        self.assertEqual(len(filter_events(self.EVENTS, "SCANS")), 0)
+
+    def test_ignore_case(self):
+        from src.utils.audit_output import filter_events
+        self.assertEqual(len(filter_events(self.EVENTS, "SCANS", ignore_case=True)), 1)
+
+    def test_non_ascii_matches(self):
+        from src.utils.audit_output import filter_events
+        self.assertEqual(len(filter_events(self.EVENTS, "José")), 1)
+        self.assertEqual(len(filter_events(self.EVENTS, "josé", ignore_case=True)), 1)
+
+
+class CancelTest(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(pipeline, "AuditEventsCollector", FakeCollector)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_cancel_raises_at_next_checkpoint(self):
+        prog = QueryProgress()
+        prog.start()
+        prog.cancel()
+        with self.assertRaises(pipeline.QueryCancelled):
+            run_query(_ctx(), date(2026, 11, 1), date(2026, 11, 9), progress=prog)
+
+    def test_start_clears_previous_cancel(self):
+        prog = QueryProgress()
+        prog.cancel()
+        prog.start()
+        self.assertFalse(prog.cancelled)
+        self.assertEqual(len(run_query(_ctx(), date(2026, 11, 1), date(2026, 11, 9), progress=prog)), 5)
+
+
 class QueryProgressTest(unittest.TestCase):
     def test_lifecycle(self):
         p = QueryProgress()

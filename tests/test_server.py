@@ -175,7 +175,7 @@ class ServerTest(unittest.TestCase):
         entered = threading.Event()
         release = threading.Event()
 
-        def slow(ctx, s, e, search, human, progress=None):
+        def slow(ctx, s, e, search, human, progress=None, **_kw):
             progress.update(stage="fetch", fetched=1000, total=4000)
             entered.set()
             release.wait(5)
@@ -200,6 +200,52 @@ class ServerTest(unittest.TestCase):
         self.assertFalse(after["running"])
         self.assertEqual(after["stage"], "done")
         self.assertEqual(after["matched"], 1)
+
+    def post(self, path, headers=None):
+        req = urllib.request.Request(self.url.rstrip("/") + path, data=b"", method="POST", headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, e.read()
+
+    def test_search_is_case_insensitive_for_the_dashboard(self):
+        with mock.patch.object(server, "run_query", return_value=[]) as rq:
+            self.api(self.recent() + "&search=Scan")
+        self.assertTrue(rq.call_args.kwargs["ignore_case"])
+
+    def test_cancel_requires_token(self):
+        self.assertEqual(self.post("/api/cancel")[0], 403)
+
+    def test_cancel_stops_running_query(self):
+        entered = threading.Event()
+
+        def slow(ctx, s, e, search, human, progress=None, **_kw):
+            entered.set()
+            for _ in range(200):  # like run_query: check between pages
+                progress.check_cancelled()
+                threading.Event().wait(0.02)
+            return []
+
+        result = {}
+        with mock.patch.object(server, "run_query", side_effect=slow):
+            t = threading.Thread(target=lambda: result.setdefault("q", self.api(self.recent())))
+            t.start()
+            self.assertTrue(entered.wait(5))
+            status, body = self.post("/api/cancel", {"X-CxOne-Token": TOKEN})
+            t.join(5)
+        self.assertEqual((status, json.loads(body)["cancelled"]), (200, True))
+        self.assertEqual(result["q"][0], 409)
+        snap = json.loads(self.get("/api/progress", {"X-CxOne-Token": TOKEN})[2])
+        self.assertEqual((snap["running"], snap["stage"]), (False, "cancelled"))
+        # Lock released: the next query runs.
+        with mock.patch.object(server, "run_query", return_value=[]):
+            self.assertEqual(self.api(self.recent())[0], 200)
+
+    def test_cancel_when_idle_is_harmless(self):
+        status, body = self.post("/api/cancel", {"X-CxOne-Token": TOKEN})
+        self.assertEqual((status, json.loads(body)["cancelled"]), (200, False))
 
     def test_progress_reports_error(self):
         with mock.patch.object(server, "run_query", side_effect=RuntimeError("boom")):

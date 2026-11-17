@@ -36,29 +36,30 @@ describe('actorLabel', () => {
   it('handles empty string', () => {
     expect(actorLabel('')).toBe('Unresolved / System');
   });
-  it('extracts name from Name (email) format', () => {
-    expect(actorLabel('John Smith (john@example.com)')).toBe('John Smith');
+  it('keeps the full "Name (username)" so same-named people stay distinct', () => {
+    expect(actorLabel('John Smith (john@example.com)')).toBe('John Smith (john@example.com)');
+    expect(actorLabel('John Smith (jsmith2)')).not.toBe(actorLabel('John Smith (john@example.com)'));
   });
-  it('truncates bare UUID', () => {
+  it('keeps bare UUIDs whole (charts shorten them for display only)', () => {
     const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-    expect(actorLabel(uuid)).toBe('a1b2c3d4…');
+    expect(actorLabel(uuid)).toBe(uuid);
   });
-  it('handles name with parentheses in it', () => {
-    expect(actorLabel('Some User (some.user@cx.com)')).toBe('Some User');
+  it('trims whitespace', () => {
+    expect(actorLabel('  Some User (some.user@cx.com) ')).toBe('Some User (some.user@cx.com)');
   });
 });
 
 // ── isNamed ──
 describe('isNamed', () => {
   it('named actors return true', () => {
-    expect(isNamed('John Smith')).toBe(true);
-    expect(isNamed('Alice Wonder')).toBe(true);
+    expect(isNamed('John Smith (jsmith)')).toBe(true);
+    expect(isNamed('svc-ci')).toBe(true);
   });
   it('Unresolved / System returns false', () => {
     expect(isNamed('Unresolved / System')).toBe(false);
   });
-  it('truncated UUID returns false', () => {
-    expect(isNamed('a1b2c3d…')).toBe(false);
+  it('bare UUID returns false', () => {
+    expect(isNamed('a1b2c3d4-e5f6-7890-abcd-ef1234567890')).toBe(false);
   });
 });
 
@@ -141,13 +142,19 @@ describe('parseAuditLog (inline fixture)', () => {
   });
 
   it('normalizes actors correctly', () => {
-    expect(ds.users).toContain('Alice Smith');
-    expect(ds.users).toContain('Bob Jones');
+    expect(ds.users).toContain('Alice Smith (alice@cx.com)');
+    expect(ds.users).toContain('Bob Jones (bob@cx.com)');
     expect(ds.users).toContain('Unresolved / System');
   });
 
+  it('keeps long values whole (no truncation)', () => {
+    const long = 'x'.repeat(500);
+    const d = parseAuditLog(`----------------------------------------\nEvent Date: 2026-05-01T10:00:00Z\nEvent Type: a.b\nAction User: u\nData:\n  k: ${long}\n`);
+    expect(d.events[0][3].k).toBe(long);
+  });
+
   it('marks named vs unnamed correctly', () => {
-    const aliceIdx = ds.users.indexOf('Alice Smith');
+    const aliceIdx = ds.users.indexOf('Alice Smith (alice@cx.com)');
     const sysIdx = ds.users.indexOf('Unresolved / System');
     expect(ds.named[aliceIdx]).toBe(1);
     expect(ds.named[sysIdx]).toBe(0);

@@ -49,16 +49,24 @@ describe('parseRawExport', () => {
     expect(ds.meta.total).toBe(2);
   });
 
-  it('maps actors, timestamps and data values', () => {
+  it('maps actors, timestamps and data values (kept as returned)', () => {
     const ds = parseRawExport(JSON.stringify(events));
     const [ts, , userIdx, data] = ds.events[0];
     expect(ts).toBe('2026-05-01T00:38:29');
-    expect(ds.users[userIdx]).toBe('Jane Doe');
+    expect(ds.users[userIdx]).toBe('Jane Doe (jdoe)');
     expect(ds.named[userIdx]).toBe(1);
-    expect(data.engines).toBe('sast, sca');
-    expect(data.nested).toBe('{"a":1}');
-    expect(ds.users[ds.events[1][2]]).toBe('3f2a91bc…');
+    expect(data.engines).toEqual(['sast', 'sca']);
+    expect(data.nested).toEqual({ a: 1 });
+    const uuidUser = ds.users[ds.events[1][2]];
+    expect(uuidUser).toBe('3f2a91bc-1111-2222-3333-444455556666');
+    expect(ds.named[ds.events[1][2]]).toBe(0);
     expect(ds.events[1][3].status).toBe('FAIL');
+  });
+
+  it('keeps event ID, IP, action type and resource', () => {
+    const withExtras = [{ ...events[0], ipAddress: '10.1.2.3' }];
+    const ds = parseRawExport(JSON.stringify(withExtras));
+    expect(ds.events[0][4]).toEqual({ id: 'e1', ip: '10.1.2.3', action: 'create', resource: 'scans' });
   });
 
   it('rejects JSON without an event array', () => {

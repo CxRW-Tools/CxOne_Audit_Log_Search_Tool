@@ -3,13 +3,19 @@
 import json
 
 
-def filter_events(events, search_string):
+def filter_events(events, search_string, ignore_case=False):
+    """
+    Keep events whose JSON contains `search_string`. Matching uses the unescaped text
+    (ensure_ascii=False) so non-ASCII names like "José" match. The CLI is case-sensitive by
+    default; the web dashboard passes ignore_case=True to match its own search box.
+    """
     if not search_string:
         return list(events)
+    needle = search_string.casefold() if ignore_case else search_string
     out = []
-    needle = search_string
     for e in events:
-        if needle in json.dumps(e, default=str):
+        hay = json.dumps(e, default=str, ensure_ascii=False)
+        if needle in (hay.casefold() if ignore_case else hay):
             out.append(e)
     return out
 
