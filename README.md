@@ -12,7 +12,7 @@ The API is documented in the [Checkmarx One API Reference — Get a list of audi
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - Dependencies: see [requirements.txt](requirements.txt)
 
 ```bash

@@ -1,2 +1,3 @@
 # Built by dashboard/ (npm run build). Collapsed in GitHub diffs and excluded from language stats.
-web/CxOne_Audit_Log_Dashboard.html linguist-generated=true
+# Always LF so the committed file matches a build on any OS (the build also writes LF).
+web/CxOne_Audit_Log_Dashboard.html text eol=lf linguist-generated=true
