@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CxOne Audit Log Dashboard</title>
+  <link rel="stylesheet" href="/src/theme.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Query bar (only shown when served by the Search Tool: python main.py --serve) -->
+    <form id="query-bar" class="query-bar" hidden autocomplete="off">
+      <div class="query-heading">
+        <span class="query-eyebrow">Query CxOne</span>
+        <span id="query-tenant" class="query-tenant"></span>
+      </div>
+      <label class="query-field">From <input type="date" id="q-start" required /></label>
+      <label class="query-field">To <input type="date" id="q-end" required /></label>
+      <input type="text" id="q-search" class="query-search" placeholder="Search string (optional)" />
+      <label class="query-check" title="Resolve user, group and role IDs to names (slower)">
+        <input type="checkbox" id="q-human" checked /> Resolve names
+      </label>
+      <button type="submit" id="q-run" class="query-run">Run query</button>
+      <span id="q-status" class="query-status" role="status" aria-live="polite"></span>
+    </form>
+
+    <!-- Loading state -->
+    <div id="loading-state">
+      <div class="spinner"></div>
+      <p>Loading audit data…</p>
+    </div>
+
+    <!-- Landing / error state -->
+    <div id="error-state" style="display:none">
+      <div class="error-icon">📂</div>
+      <p>Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.</p>
+      <label class="file-drop-zone file-drop-zone-large" id="error-file-label">
+        📂 Load file (.csv / .json / .log)
+        <input type="file" id="error-file-input" accept=".csv,.json,.log,.txt" />
+      </label>
+    </div>
+
+    <!-- Main dashboard (hidden until data loads) -->
+    <div id="dashboard" style="display:none">
+
+      <!-- Header -->
+      <header class="app-header">
+        <div class="header-logo">
+          <!-- TODO: replace with real asset once public/logo.svg is available -->
+          <img src="./logo.svg" alt="Checkmarx" onerror="this.style.display='none'" />
+        </div>
+        <div class="header-titles">
+          <div class="header-eyebrow">Security Platform</div>
+          <h1 class="header-title">Audit Log Dashboard</h1>
+        </div>
+        <div class="header-actions">
+          <label class="file-drop-zone" id="file-drop-zone">
+            📂 Load file (.csv / .json / .log)
+            <input type="file" id="file-input" accept=".csv,.json,.log,.txt" />
+          </label>
+        </div>
+      </header>
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <div id="breadcrumb-path"></div>
+        <div class="search-wrap">
+          <input type="text" id="search-input" placeholder="Search events…" autocomplete="off" />
+          <button id="reset-btn">✕ Reset all</button>
+        </div>
+      </div>
+
+      <!-- Scope summary -->
+      <div class="scope-summary" id="scope-summary"></div>
+
+      <!-- Main content -->
+      <main class="main-content">
+
+        <!-- KPI strip -->
+        <div id="kpis"></div>
+
+        <!-- Top chart row: drill + actors -->
+        <div class="chart-grid-top">
+          <div class="panel">
+            <div class="panel-title" id="drill-title">Events by Category</div>
+            <div class="panel-hint" id="drill-hint">Click a slice to drill into a category.</div>
+            <div class="chart-container-tall">
+              <canvas id="drill-canvas"></canvas>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">Top Actors</div>
+            <div class="panel-hint">Named identities by event count. Click to filter.</div>
+            <div class="chart-container-tall">
+              <canvas id="actor-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom chart row: timeline + hourly -->
+        <div class="chart-grid-bottom">
+          <div class="panel">
+            <div class="panel-title">Activity Timeline</div>
+            <div class="panel-hint">Daily event volume. Click a bar to filter by day.</div>
+            <div class="chart-container">
+              <canvas id="trend-canvas"></canvas>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">Hourly Distribution (UTC)</div>
+            <div class="panel-hint">Events by hour of day.</div>
+            <div class="chart-container">
+              <canvas id="hour-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Event log -->
+        <div class="panel">
+          <div class="panel-title">Event Log</div>
+          <div id="event-log"></div>
+        </div>
+
+      </main>
+
+      <footer class="app-footer">Checkmarx · Secure what comes next.</footer>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

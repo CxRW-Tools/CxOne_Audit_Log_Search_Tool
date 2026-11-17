@@ -1,0 +1,32 @@
+{
+  "name": "cxone-audit-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "ingest": "tsx scripts/ingest.ts",
+    "test": "vitest run",
+    "sync:search-tool": "node scripts/sync-search-tool.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer/issues"
+  },
+  "homepage": "https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer#readme",
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1"
+  }
+}
