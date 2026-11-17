@@ -357,7 +357,16 @@ function initControls(): void {
     document.getElementById('events')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
+  // Header heights change without a window resize (query status, filter chips wrapping,
+  // the facet form appearing), so watch the elements themselves.
   window.addEventListener('resize', updateStickyOffsets);
+  if ('ResizeObserver' in window) {
+    const ro = new ResizeObserver(updateStickyOffsets);
+    for (const id of ['query-bar', 'app-header', 'filter-bar']) {
+      const el = document.getElementById(id);
+      if (el) ro.observe(el);
+    }
+  }
 }
 
 /** Sticky header heights vary (wrapping query bar); expose them to CSS. */
