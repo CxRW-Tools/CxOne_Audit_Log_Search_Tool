@@ -66,7 +66,11 @@ function showError(msg: string): void {
   const errEl = document.getElementById('error-state')!;
   errEl.style.display = 'flex';
   const p = errEl.querySelector('p')!;
-  p.innerHTML = `<strong>Failed to load audit data.</strong><br>${msg}<br><br>Drop a <code>.json</code> or <code>.log</code> file to load data manually.`;
+  p.innerHTML = `<strong>Failed to load audit data.</strong><br>${msg}<br><br>Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> file to load data manually.`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function handleFileLoad(file: File): Promise<void> {
@@ -77,7 +81,7 @@ async function handleFileLoad(file: File): Promise<void> {
     const { dataset, events } = await loadFromFile(file);
     mountDashboard(dataset, events);
   } catch (err) {
-    showError(String(err));
+    showError(escapeHtml(err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -132,7 +136,7 @@ function showLanding(): void {
   document.getElementById('dashboard')!.style.display = 'none';
   document.getElementById('error-state')!.style.display = 'flex';
   const p = document.querySelector('#error-state p')!;
-  p.innerHTML = `Drop a <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.`;
+  p.innerHTML = `Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.`;
 
   // Full-page drop target while on landing screen
   document.body.addEventListener('dragover', (e) => e.preventDefault());

@@ -1,5 +1,6 @@
 import type { Dataset, DecodedEvent } from './types.js';
 import { parseAuditLog } from './parser.js';
+import { looksLikeRawExport, parseCsvExport, parseRawExport } from './apiExport.js';
 
 export function decodeDataset(ds: Dataset): DecodedEvent[] {
   return ds.events.map(([ts, typeIdx, userIdx, data]) => ({
@@ -22,37 +23,52 @@ export async function loadFromUrl(url: string): Promise<{ dataset: Dataset; even
   return { dataset, events: decodeDataset(dataset) };
 }
 
-export async function loadFromFile(file: File): Promise<{ dataset: Dataset; events: DecodedEvent[] }> {
-  const isLog = file.name.endsWith('.log') || file.name.endsWith('.txt');
-  const isJson = file.name.endsWith('.json');
+/** PowerShell `>` redirects write UTF-16LE with a BOM; everything else is UTF-8. TextDecoder strips the BOM. */
+async function readText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const b = new Uint8Array(buf);
+  const encoding = b[0] === 0xff && b[1] === 0xfe ? 'utf-16le' : 'utf-8';
+  return new TextDecoder(encoding).decode(buf);
+}
 
-  if (isJson) {
-    const text = await file.text();
-    const dataset: Dataset = JSON.parse(text);
-    return { dataset, events: decodeDataset(dataset) };
-  }
+function isDataset(v: unknown): v is Dataset {
+  const o = v as Partial<Dataset> | null;
+  return !!o && !Array.isArray(o) && Array.isArray(o.types) && Array.isArray(o.events) && !!o.meta;
+}
 
-  if (isLog) {
-    const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let text: string;
-    // Detect UTF-16LE BOM: 0xFF 0xFE
-    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-      text = new TextDecoder('utf-16le').decode(buf);
-    } else {
-      text = new TextDecoder('utf-8').decode(buf);
-    }
-    const dataset = parseAuditLog(text);
-    return { dataset, events: decodeDataset(dataset) };
-  }
+function isCsv(name: string, text: string): boolean {
+  if (name.toLowerCase().endsWith('.csv')) return true;
+  const first = text.slice(0, text.indexOf('\n') >>> 0).split(',').map((s) => s.trim());
+  return first.includes('eventDate') && first.includes('eventType');
+}
 
-  // Try JSON first, then log parsing
-  const text = await file.text();
+/**
+ * Accepts every Search Tool output, detected by content rather than extension:
+ *   - formatted stdout redirected to a file (.log/.txt)
+ *   - --raw stdout redirected to a file, or a bare JSON event array
+ *   - --csv export
+ *   - the dashboard's own pre-processed Dataset JSON
+ */
+export function parseText(text: string, fileName = ''): Dataset {
+  if (isCsv(fileName, text)) return parseCsvExport(text, fileName);
+
+  let parsed: unknown;
   try {
-    const dataset: Dataset = JSON.parse(text);
-    return { dataset, events: decodeDataset(dataset) };
+    parsed = JSON.parse(text);
   } catch {
-    const dataset = parseAuditLog(text);
-    return { dataset, events: decodeDataset(dataset) };
+    parsed = undefined;
   }
+  if (isDataset(parsed)) return parsed;
+  if (parsed !== undefined || looksLikeRawExport(text)) return parseRawExport(text);
+
+  const ds = parseAuditLog(text);
+  if (ds.events.length === 0) {
+    throw new Error('No audit events found in this file. Supported: Search Tool console output, --raw JSON, or --csv.');
+  }
+  return ds;
+}
+
+export async function loadFromFile(file: File): Promise<{ dataset: Dataset; events: DecodedEvent[] }> {
+  const dataset = parseText(await readText(file), file.name);
+  return { dataset, events: decodeDataset(dataset) };
 }

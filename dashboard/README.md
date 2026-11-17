@@ -12,12 +12,29 @@ Download [`CxOne_Audit_Log_Dashboard.html`](dist/CxOne_Audit_Log_Dashboard.html)
 
 ### 2. Generate a data file
 
-Use the [CxOne Audit Log Search Tool](https://github.com/CxRW-Tools/CxOne_Audit_Log_Search_Tool) to export audit events from your tenant. That tool produces either a `.log` file (raw export) or a `.json` file (pre-processed) — both are supported.
+Use the [CxOne Audit Log Search Tool](https://github.com/CxRW-Tools/CxOne_Audit_Log_Search_Tool) to export audit events from your tenant. Add `--human-readable` so actors show as names instead of UUIDs. Any of these work:
+
+```bash
+# CSV export (recommended) — written to ./output/audit_events_<tenant>_<timestamp>.csv
+python main.py --start-date 2026-05-01 --end-date 2026-05-31 --human-readable --csv
+```
+
+```bash
+# Raw JSON — redirect stdout to a file; the tool's banner around the JSON is handled
+python main.py --start-date 2026-05-01 --end-date 2026-05-31 --human-readable --raw > events.json
+```
+
+```bash
+# Formatted console output — redirect stdout to a file
+python main.py --start-date 2026-05-01 --end-date 2026-05-31 --human-readable > events.log
+```
+
+The file type is detected from its content, and UTF-16 files from PowerShell redirects are supported.
 
 ### 3. Open and load
 
 Open `CxOne_Audit_Log_Dashboard.html` in your browser, then either:
-- **Drag and drop** your `.json` or `.log` file onto the page, or
+- **Drag and drop** your `.csv`, `.json` or `.log` file onto the page, or
 - Click **Load file** to browse for it
 
 The dashboard loads entirely in your browser — no data leaves your machine.

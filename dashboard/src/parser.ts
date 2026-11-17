@@ -40,7 +40,14 @@ export function isNamed(label: string): boolean {
 }
 
 const SEPARATOR = '----------------------------------------';
-const MAX_VAL_LEN = 120;
+export const MAX_VAL_LEN = 120;
+
+export interface RawEvent {
+  ts: string;
+  eventType: string;
+  actorLabel: string;
+  data: Record<string, string>;
+}
 
 export function parseAuditLog(text: string): Dataset {
   // Normalize CRLF -> LF
@@ -75,13 +82,6 @@ export function parseAuditLog(text: string): Dataset {
   if (currentBlock.length > 0) blocks.push(currentBlock);
 
   // Parse each block into raw event tuples
-  interface RawEvent {
-    ts: string;
-    eventType: string;
-    actorLabel: string;
-    data: Record<string, string>;
-  }
-
   const rawEvents: RawEvent[] = [];
 
   for (const block of blocks) {
@@ -119,6 +119,11 @@ export function parseAuditLog(text: string): Dataset {
     }
   }
 
+  return buildDataset(rawEvents, tenant, baseUrl);
+}
+
+/** Turn normalized events into the dashboard's compact Dataset shape. */
+export function buildDataset(rawEvents: RawEvent[], tenant: string, baseUrl: string): Dataset {
   // Build sorted type and user arrays
   const typeSet = new Set<string>();
   const userSet = new Set<string>();
