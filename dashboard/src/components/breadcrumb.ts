@@ -2,10 +2,14 @@ import { getFilter, setFilter, resetFilter, isFilterActive } from '../state.js';
 
 type FilterChangeCallback = () => void;
 let _cb: FilterChangeCallback = () => {};
+let _wired = false;
 
 export function initBreadcrumb(cb: FilterChangeCallback): void {
   _cb = cb;
   renderBreadcrumb();
+  // mountDashboard runs on every file load / query; bind the static controls only once.
+  if (_wired) return;
+  _wired = true;
 
   const searchEl = document.getElementById('search-input') as HTMLInputElement | null;
   if (searchEl) {

@@ -8,6 +8,22 @@
 </head>
 <body>
   <div id="app">
+    <!-- Query bar (only shown when served by the Search Tool: python main.py --serve) -->
+    <form id="query-bar" class="query-bar" hidden autocomplete="off">
+      <div class="query-heading">
+        <span class="query-eyebrow">Query CxOne</span>
+        <span id="query-tenant" class="query-tenant"></span>
+      </div>
+      <label class="query-field">From <input type="date" id="q-start" required /></label>
+      <label class="query-field">To <input type="date" id="q-end" required /></label>
+      <input type="text" id="q-search" class="query-search" placeholder="Search string (optional)" />
+      <label class="query-check" title="Resolve user, group and role IDs to names (slower)">
+        <input type="checkbox" id="q-human" checked /> Resolve names
+      </label>
+      <button type="submit" id="q-run" class="query-run">Run query</button>
+      <span id="q-status" class="query-status" role="status" aria-live="polite"></span>
+    </form>
+
     <!-- Loading state -->
     <div id="loading-state">
       <div class="spinner"></div>

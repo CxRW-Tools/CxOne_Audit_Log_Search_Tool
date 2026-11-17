@@ -1,5 +1,5 @@
 import './theme.css';
-import { loadFromUrl, loadFromFile } from './loader.js';
+import { loadFromUrl, loadFromFile, decodeDataset } from './loader.js';
 import { setData, scopeSummary, getFilter } from './state.js';
 import type { Dataset, DecodedEvent } from './types.js';
 import { renderKpis, initKpis } from './components/kpis.js';
@@ -9,8 +9,15 @@ import { initActorChart, renderActorChart } from './components/actorChart.js';
 import { initTrendChart, renderTrendChart } from './components/trendChart.js';
 import { renderHourChart } from './components/hourChart.js';
 import { renderEventLog, resetEventLogPage } from './components/eventLog.js';
+import { initQueryBar } from './components/queryBar.js';
+import { getServeConfig } from './serve.js';
 
 let _allEvents: DecodedEvent[] = [];
+const _serve = getServeConfig();
+const FILE_HINT = 'Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> file to load data manually.';
+const LANDING_HINT = _serve
+  ? 'Choose a date range above and click <strong>Run query</strong>, or drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> export here.'
+  : 'Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.';
 
 function refresh(): void {
   resetEventLogPage();
@@ -66,7 +73,43 @@ function showError(msg: string): void {
   const errEl = document.getElementById('error-state')!;
   errEl.style.display = 'flex';
   const p = errEl.querySelector('p')!;
-  p.innerHTML = `<strong>Failed to load audit data.</strong><br>${msg}<br><br>Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> file to load data manually.`;
+  p.innerHTML = `<strong class="err">Failed to load audit data.</strong><br>${msg}<br><br>${FILE_HINT}`;
+}
+
+function showLoading(message: string): void {
+  document.getElementById('error-state')!.style.display = 'none';
+  document.getElementById('dashboard')!.style.display = 'none';
+  const el = document.getElementById('loading-state')!;
+  el.style.display = 'flex';
+  el.querySelector('p')!.textContent = message;
+}
+
+function initServeMode(): void {
+  if (!_serve) return;
+  let timer: number | undefined;
+  const stopTimer = () => window.clearInterval(timer);
+  initQueryBar(_serve, {
+    onStart: () => {
+      const t0 = Date.now();
+      showLoading('Querying CxOne…');
+      timer = window.setInterval(() => {
+        const s = Math.round((Date.now() - t0) / 1000);
+        document.querySelector('#loading-state p')!.textContent = `Querying CxOne… ${s}s`;
+      }, 1000);
+    },
+    onResult: ({ dataset }) => {
+      stopTimer();
+      if (dataset.meta.total === 0) {
+        showError('No audit events matched that date range and search.');
+        return;
+      }
+      mountDashboard(dataset, decodeDataset(dataset));
+    },
+    onError: (message) => {
+      stopTimer();
+      showError(escapeHtml(message));
+    },
+  });
 }
 
 function escapeHtml(s: string): string {
@@ -75,9 +118,7 @@ function escapeHtml(s: string): string {
 
 async function handleFileLoad(file: File): Promise<void> {
   try {
-    document.getElementById('loading-state')!.style.display = 'flex';
-    document.getElementById('error-state')!.style.display = 'none';
-    document.getElementById('dashboard')!.style.display = 'none';
+    showLoading('Loading audit data…');
     const { dataset, events } = await loadFromFile(file);
     mountDashboard(dataset, events);
   } catch (err) {
@@ -114,6 +155,7 @@ async function init(): Promise<void> {
   wireFileInput('error-file-input');
   wireDragDrop('file-drop-zone');
   wireDragDrop('error-file-label');
+  initServeMode();
 
   // Only auto-fetch when an explicit ?data= URL is provided
   const params = new URLSearchParams(window.location.search);
@@ -136,7 +178,7 @@ function showLanding(): void {
   document.getElementById('dashboard')!.style.display = 'none';
   document.getElementById('error-state')!.style.display = 'flex';
   const p = document.querySelector('#error-state p')!;
-  p.innerHTML = `Drop a <code>.csv</code>, <code>.json</code> or <code>.log</code> export here, or click <strong>Load file</strong> to get started.`;
+  p.innerHTML = LANDING_HINT;
 
   // Full-page drop target while on landing screen
   document.body.addEventListener('dragover', (e) => e.preventDefault());

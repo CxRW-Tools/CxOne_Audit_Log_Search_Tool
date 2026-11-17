@@ -33,6 +33,11 @@ function toRawEvents(items: ApiEvent[]): RawEvent[] {
   return out;
 }
 
+/** Build a Dataset from API-shaped events (e.g. the --serve /api/events response). */
+export function datasetFromApiEvents(items: unknown[], tenant = '', baseUrl = ''): Dataset {
+  return buildDataset(toRawEvents(items as ApiEvent[]), tenant, baseUrl);
+}
+
 /** Read `Tenant:` / `Base URL:` lines from the tool's startup banner, if present. */
 function bannerMeta(text: string): { tenant: string; baseUrl: string } {
   const tenant = text.match(/^Tenant:[ \t]*(.*)$/m)?.[1]?.trim() ?? '';
