@@ -187,8 +187,8 @@ def create_server(ctx, html_path=None, port=8765, token=None):
     html_path = os.path.abspath(html_path or DEFAULT_DASHBOARD_PATH)
     if not os.path.isfile(html_path):
         raise FileNotFoundError(
-            f"Dashboard HTML not found at {html_path}. Pass --dashboard-html PATH "
-            "or copy CxOne_Audit_Log_Dashboard.html from the Visualizer's dist/ folder into web/."
+            f"Dashboard HTML not found at {html_path}. Pass --dashboard-html PATH, "
+            "or rebuild it: cd dashboard && npm ci && npm run build"
         )
 
     token = token or secrets.token_urlsafe(32)

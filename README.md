@@ -1,8 +1,12 @@
 # CxOne Audit Log Search Tool
 
-Python CLI to search and export **Checkmarx One** audit events using the REST API **`GET /api/audit-events/`** (replaces the legacy `GET /api/audit/` flow). Events are retrieved for a date range (up to the **previous 365 days**), with optional filtering, human-readable UUID resolution, console output, and **CSV export**.
+Search, export and visualize **Checkmarx One** audit events using the REST API **`GET /api/audit-events/`** (replaces the legacy `GET /api/audit/` flow). Events are retrieved for a date range (up to the **previous 365 days**), with optional filtering and human-readable UUID resolution.
 
-It can also run as a **local web dashboard** (`--serve`): query your tenant from the browser and explore the results in the [CxOne Audit Log Dashboard](https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer). See [Web dashboard](#web-dashboard---serve).
+Three ways to use it:
+
+- **CLI** — print events, or export **CSV** / raw JSON for scripts and spreadsheets. See [Usage](#usage).
+- **Web dashboard** — `python main.py --serve` opens an interactive dashboard in your browser with a query bar. See [Web dashboard](#web-dashboard---serve).
+- **Standalone dashboard** — open [`web/CxOne_Audit_Log_Dashboard.html`](web/CxOne_Audit_Log_Dashboard.html) in any browser and drop in a file the CLI exported. No Python or server needed. See [Standalone dashboard](#standalone-dashboard).
 
 The API is documented in the [Checkmarx One API Reference — Get a list of audit events](https://checkmarx.stoplight.io/docs/checkmarx-one-api-reference-guide/ofyf0dxa4e6w2-get-a-list-of-audit-events). Some tenants or regions may still be rolling out this endpoint; if calls fail, confirm availability in your environment.
 
@@ -96,7 +100,16 @@ python main.py --start-date 2026-03-01 --end-date 2026-03-02 --csv --raw --print
 python main.py --serve
 ```
 
-This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range, optionally a search string, and click **Run query**. The results load into the interactive dashboard (KPIs, drill-down by category / event type / actor, timeline, hourly distribution, event log). You can run as many queries as you like; press **Ctrl+C** in the terminal to stop.
+This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range, optionally a search string, and click **Run query**. You can run as many queries as you like; press **Ctrl+C** in the terminal to stop.
+
+The dashboard shows:
+
+- **KPI strip** — total events, scans created, projects created, logins (success/fail), source-code downloads. Click a card to filter to it.
+- **Drill-down chart** — category → event type → actor; breadcrumb chips step back a level
+- **Top Actors** — named identities ranked by event count; click to filter
+- **Activity Timeline** — daily volume; click a bar to filter by day
+- **Hourly Distribution** — events by UTC hour
+- **Event Log** — sortable, paginated table with expandable rows and free-text search
 
 Only credentials are required (from `.env` or the CLI flags); dates are chosen in the browser. Queries run the same pipeline as the CLI, so `--search-string` and `--human-readable` behave identically (the **Resolve names** checkbox, on by default). Name lookups are cached for the life of the server, so later queries are faster.
 
@@ -109,7 +122,28 @@ Only credentials are required (from `.env` or the CLI flags); dates are chosen i
 
 **Security:** the server listens on `127.0.0.1` only and your API key never leaves the Python process — the browser only receives audit events. Requests must carry a random per-run token that is embedded in the served page, and requests with a non-local `Host` header are rejected, so other websites open in your browser can't query it. Anyone with access to your machine's loopback interface while it runs (for example other users on a shared host) could load the page, so stop it when you're done.
 
-The dashboard file in [web/](web/) is a build artifact of the Visualizer repo. To update it, run `npm run build && npm run sync:search-tool` there.
+## Standalone dashboard
+
+[`web/CxOne_Audit_Log_Dashboard.html`](web/CxOne_Audit_Log_Dashboard.html) is a single self-contained file. Open it in a browser (or send it to someone) and drag in, or **Load file**, any CLI export. Everything runs in the browser; no data leaves the machine.
+
+Use `--human-readable` so actors show as names instead of UUIDs:
+
+```bash
+# CSV (recommended) — written to ./output/audit_events_<tenant>_<timestamp>.csv
+python main.py --start-date 2026-05-01 --end-date 2026-05-31 --human-readable --csv
+```
+
+```bash
+# Raw JSON — redirect stdout; the banner around the JSON is handled
+python main.py --start-date 2026-05-01 --end-date 2026-05-31 --human-readable --raw > events.json
+```
+
+```bash
+# Formatted console output — redirect stdout
+python main.py --start-date 2026-05-01 --end-date 2026-05-31 --human-readable > events.log
+```
+
+The format is detected from the file's content, and UTF-16 files from PowerShell redirects work.
 
 ## API behavior (summary)
 
@@ -131,8 +165,26 @@ When using `--csv`, each row includes:
 - [src/server.py](src/server.py) — local web server for `--serve`
 - [src/utils/](src/utils/) — config, auth, API client, CSV, file/debug helpers
 - [src/operations/](src/operations/) — audit fetch and UUID resolution
-- [web/](web/) — bundled dashboard HTML served by `--serve`
-- [tests/](tests/) — `python -m unittest discover -s tests -t .` (no credentials needed)
+- [tests/](tests/) — Python tests
+- [dashboard/](dashboard/) — dashboard source (TypeScript, Vite, Chart.js); see [dashboard/README.md](dashboard/README.md)
+- [web/](web/) — built dashboard, served by `--serve` and usable standalone. **Generated; don't edit by hand.**
+
+## Development
+
+```bash
+python -m unittest discover -s tests -t .   # Python tests (no credentials needed)
+```
+
+The dashboard needs Node.js 22+ only if you change it. Python users never need Node, because the built HTML is committed in `web/`.
+
+```bash
+cd dashboard
+npm ci
+npm test         # unit tests
+npm run build    # rebuilds ../web/CxOne_Audit_Log_Dashboard.html
+```
+
+Commit the rebuilt `web/` file together with your dashboard changes; CI fails if they differ.
 
 ## License
 

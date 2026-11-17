@@ -5,3 +5,7 @@ __pycache__/
 *.pyc
 *.pyo
 .Python
+
+# Dashboard (Node) — dashboard/.gitignore covers the rest
+dashboard/node_modules/
+dashboard/dist/

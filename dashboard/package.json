@@ -7,18 +7,18 @@
     "build": "vite build",
     "preview": "vite preview",
     "ingest": "tsx scripts/ingest.ts",
-    "test": "vitest run",
-    "sync:search-tool": "node scripts/sync-search-tool.mjs"
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer.git"
+    "url": "git+https://github.com/CxRW-Tools/CxOne_Audit_Log_Search_Tool.git",
+    "directory": "dashboard"
   },
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
-    "url": "https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer/issues"
+    "url": "https://github.com/CxRW-Tools/CxOne_Audit_Log_Search_Tool/issues"
   },
-  "homepage": "https://github.com/CxRW-Tools/CxOne_Audit_Log_Visualizer#readme",
+  "homepage": "https://github.com/CxRW-Tools/CxOne_Audit_Log_Search_Tool#readme",
   "devDependencies": {
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
