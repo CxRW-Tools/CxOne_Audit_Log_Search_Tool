@@ -11,11 +11,18 @@ class APIClient:
         self.config = config
         self.debug = debug
         self.logger = debug_logger
+        # Optional callable(str) for user-visible waits (rate limits, retries); used by --serve.
+        self.notice_callback = None
 
-    def get_audit_events_all(self, params_base):
+    def _notice(self, message):
+        if self.notice_callback:
+            self.notice_callback(message)
+
+    def get_audit_events_all(self, params_base, on_page=None):
         """
         GET /api/audit-events/ with full pagination until all events are collected.
         params_base must include startDate and endDate (RFC3339).
+        on_page(fetched_so_far, total_filtered_or_None) is called after each page.
         """
         endpoint = "/api/audit-events/"
         all_events = []
@@ -45,6 +52,8 @@ class APIClient:
 
             events = data.get("events") or []
             all_events.extend(events)
+            if on_page:
+                on_page(len(all_events), total_filtered)
 
             if self.logger:
                 self.logger.log(
@@ -83,6 +92,7 @@ class APIClient:
                     wait_time = 30
                     if self.debug:
                         print(f"Rate limited. Waiting {wait_time}s...")
+                    self._notice(f"Rate limited by CxOne — waiting {wait_time}s before retrying")
                     time.sleep(wait_time)
                     continue
 
@@ -96,6 +106,7 @@ class APIClient:
                         self.logger.log(f"API: Timeout on {url}. Retrying in {wait_time}s...")
                     if self.debug:
                         print(f"Timeout. Retrying in {wait_time}s...")
+                    self._notice(f"CxOne request timed out — retrying in {wait_time:g}s")
                     time.sleep(wait_time)
                 else:
                     if self.logger:
@@ -109,6 +120,7 @@ class APIClient:
                         self.logger.log(f"API: Error on {url}: {e}. Retrying in {wait_time}s...")
                     if self.debug:
                         print(f"Error: {e}. Retrying...")
+                    self._notice(f"CxOne request failed — retrying in {wait_time:g}s")
                     time.sleep(wait_time)
                 else:
                     if self.logger:

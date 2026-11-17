@@ -23,10 +23,11 @@ def _rfc3339_utc_bounds(start_date: date, end_date: date):
 
 
 class AuditEventsCollector(Operation):
-    def execute(self, start_date: date, end_date: date):
+    def execute(self, start_date: date, end_date: date, on_page=None):
+        """`on_page(fetched_so_far, total_or_None)` is called after each page."""
         start_s, end_s = _rfc3339_utc_bounds(start_date, end_date)
         params = {"startDate": start_s, "endDate": end_s}
         if self.logger:
             self.logger.log(f"AuditEventsCollector: startDate={start_s} endDate={end_s}")
-        events = self.api_client.get_audit_events_all(params)
+        events = self.api_client.get_audit_events_all(params, on_page=on_page)
         return events or []

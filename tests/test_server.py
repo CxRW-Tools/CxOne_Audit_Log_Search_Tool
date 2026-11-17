@@ -167,6 +167,47 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(results["first"][0], 200)
 
 
+    # ── progress ──────────────────────────────────────────────────────────────
+    def test_progress_requires_token(self):
+        self.assertEqual(self.get("/api/progress")[0], 403)
+
+    def test_progress_reflects_running_query_then_done(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow(ctx, s, e, search, human, progress=None):
+            progress.update(stage="fetch", fetched=1000, total=4000)
+            entered.set()
+            release.wait(5)
+            return list(EVENTS)
+
+        result = {}
+        with mock.patch.object(server, "run_query", side_effect=slow):
+            t = threading.Thread(target=lambda: result.setdefault("q", self.api(self.recent())))
+            t.start()
+            self.assertTrue(entered.wait(5), "query never started")
+            status, _, body = self.get("/api/progress", {"X-CxOne-Token": TOKEN})
+            during = json.loads(body)
+            release.set()
+            t.join(5)
+        self.assertEqual(status, 200)
+        self.assertTrue(during["running"])
+        self.assertEqual((during["stage"], during["fetched"], during["total"]), ("fetch", 1000, 4000))
+        self.assertTrue(during["humanReadable"])
+        self.assertEqual(result["q"][0], 200)
+
+        after = json.loads(self.get("/api/progress", {"X-CxOne-Token": TOKEN})[2])
+        self.assertFalse(after["running"])
+        self.assertEqual(after["stage"], "done")
+        self.assertEqual(after["matched"], 1)
+
+    def test_progress_reports_error(self):
+        with mock.patch.object(server, "run_query", side_effect=RuntimeError("boom")):
+            self.api(self.recent())
+        after = json.loads(self.get("/api/progress", {"X-CxOne-Token": TOKEN})[2])
+        self.assertEqual((after["running"], after["stage"], after["error"]), (False, "error", "boom"))
+
+
 class ParseDateRangeTest(unittest.TestCase):
     def test_caps_future_end_to_today(self):
         today = date.today()

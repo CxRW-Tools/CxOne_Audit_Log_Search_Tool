@@ -22,6 +22,10 @@ class UuidResolver:
         self.debug = debug
         self._cache = {}
 
+    def cache_size(self) -> int:
+        """Number of distinct IDs looked up so far (each was one IAM request)."""
+        return len(self._cache)
+
     def _iam_base(self):
         return self.auth.iam_base_url
 

@@ -10,6 +10,7 @@ import { initTrendChart, renderTrendChart } from './components/trendChart.js';
 import { renderHourChart } from './components/hourChart.js';
 import { renderEventLog, resetEventLogPage } from './components/eventLog.js';
 import { initQueryBar } from './components/queryBar.js';
+import { startQueryProgress, type ProgressHandle } from './components/queryProgress.js';
 import { getServeConfig } from './serve.js';
 
 let _allEvents: DecodedEvent[] = [];
@@ -86,19 +87,20 @@ function showLoading(message: string): void {
 
 function initServeMode(): void {
   if (!_serve) return;
-  let timer: number | undefined;
-  const stopTimer = () => window.clearInterval(timer);
-  initQueryBar(_serve, {
-    onStart: () => {
-      const t0 = Date.now();
+  const cfg = _serve;
+  let progress: ProgressHandle | null = null;
+  const stopProgress = () => {
+    progress?.stop();
+    progress = null;
+  };
+  initQueryBar(cfg, {
+    onStart: ({ humanReadable }) => {
       showLoading('Querying CxOne…');
-      timer = window.setInterval(() => {
-        const s = Math.round((Date.now() - t0) / 1000);
-        document.querySelector('#loading-state p')!.textContent = `Querying CxOne… ${s}s`;
-      }, 1000);
+      progress = startQueryProgress(cfg, humanReadable);
     },
+    onPhase: (phase) => progress?.setPhase(phase),
     onResult: ({ dataset }) => {
-      stopTimer();
+      stopProgress();
       if (dataset.meta.total === 0) {
         showError('No audit events matched that date range and search.');
         return;
@@ -106,7 +108,7 @@ function initServeMode(): void {
       mountDashboard(dataset, decodeDataset(dataset));
     },
     onError: (message) => {
-      stopTimer();
+      stopProgress();
       showError(escapeHtml(message));
     },
   });

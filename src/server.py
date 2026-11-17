@@ -25,7 +25,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from src.pipeline import parse_date_range, run_query
+from src.pipeline import QueryProgress, parse_date_range, run_query
 
 DASHBOARD_FILENAME = "CxOne_Audit_Log_Dashboard.html"
 DEFAULT_DASHBOARD_PATH = os.path.join(
@@ -51,6 +51,7 @@ class _State:
         self.token = token
         self.port = port
         self.query_lock = threading.Lock()
+        self.progress = QueryProgress()
         self.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
 
@@ -104,6 +105,8 @@ def _make_handler(state: _State):
                 return self._dashboard()
             if url.path == "/api/events":
                 return self._events(parse_qs(url.query))
+            if url.path == "/api/progress":
+                return self._progress()
             if url.path == "/favicon.ico":
                 return self._send(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return self._error(HTTPStatus.NOT_FOUND, "Not found.")
@@ -127,10 +130,20 @@ def _make_handler(state: _State):
             )
             self._send(HTTPStatus.OK, html.encode("utf-8"), "text/html; charset=utf-8")
 
-        def _events(self, qs):
+        def _authorized(self):
             sent = self.headers.get(TOKEN_HEADER) or ""
-            if not hmac.compare_digest(sent, state.token):
-                return self._error(HTTPStatus.FORBIDDEN, "Missing or invalid session token. Reload the page.")
+            if hmac.compare_digest(sent, state.token):
+                return True
+            self._error(HTTPStatus.FORBIDDEN, "Missing or invalid session token. Reload the page.")
+            return False
+
+        def _progress(self):
+            if self._authorized():
+                self._json(HTTPStatus.OK, state.progress.snapshot())
+
+        def _events(self, qs):
+            if not self._authorized():
+                return
 
             def arg(name, default=""):
                 return (qs.get(name) or [default])[0]
@@ -144,7 +157,11 @@ def _make_handler(state: _State):
 
             if not state.query_lock.acquire(blocking=False):
                 return self._error(HTTPStatus.CONFLICT, "Another query is already running. Wait for it to finish.")
+            # The lock (and progress) cover the whole request, including serializing and sending
+            # the response, which can take a few seconds for large result sets.
             started = time.time()
+            progress = state.progress
+            progress.start(humanReadable=human_readable)
             try:
                 print(
                     f"Query: {start_date} to {end_date}"
@@ -153,31 +170,39 @@ def _make_handler(state: _State):
                     + " ...",
                     flush=True,
                 )
-                events = run_query(state.ctx, start_date, end_date, search, human_readable)
-            except Exception as e:  # report to the page; keep serving
-                print(f"  failed: {e}", flush=True)
-                return self._error(HTTPStatus.BAD_GATEWAY, str(e))
-            finally:
-                state.query_lock.release()
+                try:
+                    events = run_query(
+                        state.ctx, start_date, end_date, search, human_readable, progress=progress
+                    )
+                except Exception as e:  # report to the page; keep serving
+                    print(f"  failed: {e}", flush=True)
+                    progress.finish(error=e)
+                    return self._error(HTTPStatus.BAD_GATEWAY, str(e))
 
-            elapsed = round(time.time() - started, 1)
-            print(f"  {len(events)} events in {elapsed}s", flush=True)
-            self._json(
-                HTTPStatus.OK,
-                {
-                    "meta": {
-                        "tenant": config.tenant_name,
-                        "baseUrl": config.base_url,
-                        "startDate": start_date.isoformat(),
-                        "endDate": end_date.isoformat(),
-                        "search": search or "",
-                        "humanReadable": human_readable,
-                        "count": len(events),
-                        "elapsedSeconds": elapsed,
+                elapsed = round(time.time() - started, 1)
+                print(f"  {len(events)} events in {elapsed}s", flush=True)
+                progress.update(stage="send", matched=len(events))
+                self._json(
+                    HTTPStatus.OK,
+                    {
+                        "meta": {
+                            "tenant": config.tenant_name,
+                            "baseUrl": config.base_url,
+                            "startDate": start_date.isoformat(),
+                            "endDate": end_date.isoformat(),
+                            "search": search or "",
+                            "humanReadable": human_readable,
+                            "count": len(events),
+                            "elapsedSeconds": elapsed,
+                        },
+                        "events": events,
                     },
-                    "events": events,
-                },
-            )
+                )
+                progress.finish()
+            finally:
+                if progress.snapshot().get("running"):  # unexpected exit: never leave it "running"
+                    progress.finish(error="Query was interrupted.")
+                state.query_lock.release()
 
     return Handler
 

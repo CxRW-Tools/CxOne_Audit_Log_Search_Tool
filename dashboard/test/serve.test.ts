@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { buildQueryUrl, defaultRange, runQuery, type ServeConfig } from '../src/serve';
+import { buildQueryUrl, defaultRange, describeProgress, runQuery, type QueryProgress, type ServeConfig } from '../src/serve';
 
 const cfg: ServeConfig = {
   token: 'tok',
@@ -61,5 +61,57 @@ describe('runQuery', () => {
   it('explains when the server is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
     await expect(runQuery(cfg, { start: 'a', end: 'b', search: '', humanReadable: false })).rejects.toThrow(/--serve/);
+  });
+});
+
+describe('describeProgress', () => {
+  const p = (x: Partial<QueryProgress>): QueryProgress => ({ running: true, stage: 'auth', ...x });
+
+  it('starts at sign-in, indeterminate', () => {
+    const v = describeProgress(p({ stage: 'auth' }), true);
+    expect(v).toMatchObject({ title: 'Signing in to CxOne', percent: null, step: 1, steps: 3 });
+  });
+
+  it('is indeterminate until the first page reports a total', () => {
+    expect(describeProgress(p({ stage: 'fetch', fetched: 0, total: null }), true)).toMatchObject({
+      percent: null,
+      detail: 'Waiting for the first page from CxOne…',
+    });
+  });
+
+  it('shows fetched of total once known', () => {
+    const v = describeProgress(p({ stage: 'fetch', fetched: 3000, total: 12000 }), false);
+    expect(v.percent).toBe(25);
+    expect(v.detail).toBe(`${(3000).toLocaleString()} of ${(12000).toLocaleString()} events`);
+    expect(v.steps).toBe(2);
+  });
+
+  it('keeps the bar full while filtering (fetch is done)', () => {
+    expect(describeProgress(p({ stage: 'filter', fetched: 280 }), true)).toMatchObject({ percent: 100, step: 1 });
+  });
+
+  it('handles an empty range', () => {
+    expect(describeProgress(p({ stage: 'fetch', fetched: 0, total: 0 }), true).percent).toBe(100);
+  });
+
+  it('shows resolve progress with lookups as step 2 of 3', () => {
+    const v = describeProgress(p({ stage: 'resolve', resolved: 50, resolveTotal: 200, lookups: 1 }), true);
+    expect(v).toMatchObject({ step: 2, steps: 3, percent: 25 });
+    expect(v.detail).toContain('1 name lookup');
+    expect(v.detail).not.toContain('lookups');
+  });
+
+  it('passes notices through (e.g. rate limiting)', () => {
+    const v = describeProgress(p({ stage: 'fetch', total: 10, fetched: 5, notice: 'Rate limited' }), true);
+    expect(v.notice).toBe('Rate limited');
+  });
+
+  it('client phases take over as the final step', () => {
+    expect(describeProgress(p({ stage: 'send', matched: 9 }), false, 'receiving')).toMatchObject({
+      title: 'Downloading results',
+      step: 2,
+      steps: 2,
+    });
+    expect(describeProgress(null, true, 'building')).toMatchObject({ title: 'Building dashboard', step: 3 });
   });
 });

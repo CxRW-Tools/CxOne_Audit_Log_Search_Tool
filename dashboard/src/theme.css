@@ -408,6 +408,23 @@ body::before {
 .query-status { font-size: 12px; }
 .query-status-error { color: var(--crit); }
 
+/* ── Query progress (loading screen, --serve mode) ── */
+.query-progress { width: min(440px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; }
+.query-progress[hidden], #loading-state > p[hidden] { display: none; }
+.qp-head { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.qp-elapsed { font-variant-numeric: tabular-nums; }
+.qp-title { font-size: 15px; font-weight: 600; color: var(--cx-white); }
+.qp-bar { position: relative; height: 6px; border-radius: 3px; background: var(--panel2); border: 1px solid var(--line); overflow: hidden; }
+.qp-fill { height: 100%; width: 0; background: var(--cx-violet); border-radius: 3px; transition: width 0.4s ease; }
+.qp-indeterminate .qp-fill { width: 30%; position: absolute; animation: qp-slide 1.2s ease-in-out infinite; }
+@keyframes qp-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .qp-indeterminate .qp-fill { animation: none; left: 0; width: 100%; opacity: 0.35; }
+}
+.qp-detail { font-size: 13px; font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.qp-notice { font-size: 12px; color: var(--amber); }
+.qp-notice[hidden] { display: none; }
+
 /* ── Footer ── */
 .app-footer {
   padding: 16px 24px;

@@ -1,8 +1,10 @@
 // Query bar shown only when the dashboard is served by `python main.py --serve`.
-import { defaultRange, runQuery, type QueryResult, type ServeConfig } from '../serve.js';
+import { defaultRange, runQuery, type ClientPhase, type QueryResult, type ServeConfig } from '../serve.js';
 
 export interface QueryBarHandlers {
-  onStart: () => void;
+  onStart: (opts: { humanReadable: boolean }) => void;
+  /** Called when the response arrives and again before the dataset is built. */
+  onPhase: (phase: ClientPhase) => void | Promise<void>;
   onResult: (r: QueryResult) => void;
   onError: (message: string) => void;
 }
@@ -51,15 +53,15 @@ export function initQueryBar(cfg: ServeConfig, h: QueryBarHandlers): void {
     run.textContent = 'Running…';
     status.textContent = '';
     status.className = 'query-status';
-    h.onStart();
+    h.onStart({ humanReadable: human.checked });
 
     try {
-      const result = await runQuery(cfg, {
-        start: start.value,
-        end: end.value,
-        search: search.value,
-        humanReadable: human.checked,
-      });
+      const result = await runQuery(
+        cfg,
+        { start: start.value, end: end.value, search: search.value, humanReadable: human.checked },
+        undefined,
+        h.onPhase,
+      );
       status.textContent = `${result.count.toLocaleString()} events · ${result.elapsedSeconds}s`;
       h.onResult(result);
     } catch (err) {

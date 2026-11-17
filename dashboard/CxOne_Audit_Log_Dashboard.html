@@ -28,6 +28,19 @@
     <div id="loading-state">
       <div class="spinner"></div>
       <p>Loading audit data…</p>
+      <!-- Query progress (--serve mode only); filled by src/components/queryProgress.ts -->
+      <div id="query-progress" class="query-progress" hidden>
+        <div class="qp-head">
+          <span id="qp-step" class="qp-step"></span>
+          <span id="qp-elapsed" class="qp-elapsed"></span>
+        </div>
+        <div id="qp-title" class="qp-title"></div>
+        <div id="qp-bar" class="qp-bar" role="progressbar" aria-labelledby="qp-title" aria-valuemin="0" aria-valuemax="100">
+          <div id="qp-fill" class="qp-fill"></div>
+        </div>
+        <div id="qp-detail" class="qp-detail"></div>
+        <div id="qp-notice" class="qp-notice" hidden></div>
+      </div>
     </div>
 
     <!-- Landing / error state -->

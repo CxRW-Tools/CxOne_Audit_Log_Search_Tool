@@ -100,7 +100,7 @@ python main.py --start-date 2026-03-01 --end-date 2026-03-02 --csv --raw --print
 python main.py --serve
 ```
 
-This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range, optionally a search string, and click **Run query**. You can run as many queries as you like; press **Ctrl+C** in the terminal to stop.
+This starts a local server at `http://127.0.0.1:8765/` and opens it in your browser. Pick a date range, optionally a search string, and click **Run query**. While it runs, the page shows the current step (fetching, resolving names, preparing results) with a progress bar and counts, plus any rate-limit waits or retries. You can run as many queries as you like; press **Ctrl+C** in the terminal to stop.
 
 The dashboard shows:
 
